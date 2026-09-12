@@ -27,13 +27,5 @@ def call_service(domain, service, entity_id):
         timeout=5
     )
     
-    print("status:", response.status_code)
-    print("response:", response.text)
-    print("HA URL:", HA_URL)
-    print("Token loaded:", HA_TOKEN is not None)
-
     response.raise_for_status()
-
-if __name__ == "__main__":
-    call_service("light", "turn_off", "light.nanoleafs")
     
