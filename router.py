@@ -12,6 +12,7 @@ class Action:
 
 COMMANDS = {
     "turn on desk lights": Action("home_assistant", "turn_on", "light.nanoleafs"),
+    "turn off desk lights": Action("home_assistant", "turn_off", "light.nanoleafs"),
 }
 
 
