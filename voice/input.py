@@ -46,7 +46,7 @@ def record():
             print("Recording — press Space to stop (30-second limit).", flush=True)
             deadline = time.monotonic() + MAX_SECONDS
             while time.monotonic() < deadline:
-                ready, _, _ = select.select([sys.stdin], [], 0.1)
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
                 if ready:
                     key = os.read(fd, 1)
                     if not key:

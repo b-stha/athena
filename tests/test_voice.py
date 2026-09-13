@@ -1,5 +1,6 @@
 import unittest
 import io
+import tempfile
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,6 +40,24 @@ class TranscriptionTests(unittest.TestCase):
 
 
 class RecordingTests(unittest.TestCase):
+    def test_recording_polls_real_file_descriptor(self):
+        # Exercise real select() so mocks cannot hide an invalid call signature.
+        with tempfile.TemporaryFile() as keys:
+            keys.write(b"  ")
+            keys.seek(0)
+            stdin = MagicMock()
+            stdin.fileno.return_value = keys.fileno()
+            with patch.object(microphone.sys, "stdin", stdin), \
+                 patch.object(microphone.termios, "tcgetattr", return_value=[1]), \
+                 patch.object(microphone.tty, "setcbreak"), \
+                 patch.object(microphone.termios, "tcflush"), \
+                 patch.object(microphone.termios, "tcsetattr") as restore, \
+                 patch.object(microphone.sd, "RawInputStream") as stream, \
+                 redirect_stdout(io.StringIO()):
+                self.assertEqual(microphone.record(), b"")
+            stream.return_value.__exit__.assert_called_once()
+            restore.assert_called_once()
+
     def test_terminal_restored_after_microphone_failure(self):
         stdin = MagicMock()
         stdin.fileno.return_value = 10
