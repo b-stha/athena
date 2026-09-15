@@ -38,8 +38,6 @@ The current implementation includes:
 
 Example commands include `turn on desk lights`, `turn off table glow`, `turn on under glow`, `turn off bedroom lights`, and `turn on bathroom lights`.
 
-Voice transcription and Nanoleaf on/off control have been tested live. The Govee entity-to-device mapping still needs verification after Table Glow and Under Glow were reported to control the same physical device.
-
 Brightness commands, scenes, the Windows desktop agent, and LLM fallback remain planned additions.
 
 ## Stack
