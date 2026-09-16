@@ -28,3 +28,20 @@ HTTP errors, failed commands, and mismatched responses do not report success.
 The desktop server currently returns HTTP 501 until a command handler is implemented.
 This step adds core-side routing and transport only; it cannot launch Notepad yet.
 Existing Home Assistant light commands continue to use their own integration.
+
+# Wake-on-LAN
+
+Set `PC_MAC_ADDRESS` in `.env` to the PC's network adapter MAC address
+(colon-separated, hyphen-separated, or 12 hexadecimal digits).
+Optionally set `WOL_BROADCAST_ADDRESS` to your subnet's broadcast address;
+the default is `255.255.255.255`. Athena sends one UDP magic packet to port 9.
+
+Use `turn on PC` or `turn on my PC` in text or voice mode. This does not use
+HTTP or require the desktop process to be running. The PC must already be
+configured to support Wake-on-LAN. Sending a packet does not confirm startup.
+
+For a live test, configure the MAC address, put the PC in a wake-capable state,
+then issue either command from Athena and observe the PC. No automatic retries,
+startup detection, or PC shutdown commands are implemented.
+
+Packet format reference: [AMD Magic Packet Technology](https://www.amd.com/content/dam/amd/en/documents/archived-tech-docs/white-papers/20213.pdf).

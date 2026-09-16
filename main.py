@@ -51,7 +51,10 @@ def main():
             except ValueError as error:
                 print(error)
             else:
-                print(f"Done: {action.action} {action.target}")
+                if action.backend == "wake_on_lan":
+                    print("Wake packet sent. PC startup is not confirmed.")
+                else:
+                    print(f"Done: {action.action} {action.target}")
     except (EOFError, KeyboardInterrupt):
         print()
 
