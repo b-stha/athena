@@ -51,7 +51,7 @@ def main():
             except ValueError as error:
                 print(error)
             else:
-                if action.backend == "wake_on_lan":
+                if action.backend == "desktop" and action.action == "wake":
                     print("Wake packet sent. PC startup is not confirmed.")
                 else:
                     print(f"Done: {action.action} {action.target}")

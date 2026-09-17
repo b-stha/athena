@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from integrations import desktop, home_assistant, wake_on_lan
+from integrations import desktop, home_assistant
 
 
 @dataclass(frozen=True)
@@ -15,11 +15,8 @@ ACTIONS = {"turn on": "turn_on", "turn off": "turn_off"}
 
 DESKTOP_COMMANDS = {
     "open notepad": Action("desktop", "launch_app", "notepad", "application"),
-}
-
-WAKE_COMMANDS = {
-    "turn on pc": Action("wake_on_lan", "wake", "pc", "device"),
-    "turn on my pc": Action("wake_on_lan", "wake", "pc", "device"),
+    "turn on pc": Action("desktop", "wake", "pc", "device"),
+    "turn on my pc": Action("desktop", "wake", "pc", "device"),
 }
 
 TARGETS = {
@@ -44,7 +41,7 @@ ALIASES = {
 
 def route(command):
     normalized = " ".join(command.lower().split())
-    action = WAKE_COMMANDS.get(normalized) or DESKTOP_COMMANDS.get(normalized)
+    action = DESKTOP_COMMANDS.get(normalized)
     if action is None:
         action = resolve_light_action(normalized)
 
@@ -55,9 +52,7 @@ def route(command):
             domain = action.target.split(".", 1)[0]
             home_assistant.call_service(domain, action.action, action.target)
     elif action.backend == "desktop":
-        desktop.send_command(action.action, {"name": action.target})
-    elif action.backend == "wake_on_lan":
-        wake_on_lan.wake_pc()
+        desktop.execute(action.action, action.target)
     else:
         raise ValueError(f"Unsupported backend: {action.backend}")
 
