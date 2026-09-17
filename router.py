@@ -1,5 +1,3 @@
-#!/home/MK/Documents/athena/.venv/bin/python
-
 from dataclasses import dataclass
 
 from integrations import desktop, home_assistant
