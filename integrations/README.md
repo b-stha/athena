@@ -31,6 +31,9 @@ Existing Home Assistant light commands continue to use their own integration.
 
 # Wake-on-LAN
 
+Wake-on-LAN is handled inside `desktop.py`, alongside desktop HTTP requests.
+Both PC wake phrases use the `desktop` backend; `execute()` selects the transport.
+
 Set `PC_MAC_ADDRESS` in `.env` to the PC's network adapter MAC address
 (colon-separated, hyphen-separated, or 12 hexadecimal digits).
 Optionally set `WOL_BROADCAST_ADDRESS` to your subnet's broadcast address;
