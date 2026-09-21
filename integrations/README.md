@@ -25,8 +25,9 @@ The request has a five-second timeout and is not automatically retried.
 A successful response must contain the matching `requestId` and `success: true`.
 HTTP errors, failed commands, and mismatched responses do not report success.
 
-The desktop server currently returns HTTP 501 until a command handler is implemented.
-This step adds core-side routing and transport only; it cannot launch Notepad yet.
+The [Athena Desktop](https://github.com/b-stha/athena-desktop) C#/.NET client
+now supports launching Notepad through `launch_app`. The full voice-to-desktop
+Notepad launch has been confirmed in live testing.
 Existing Home Assistant light commands continue to use their own integration.
 
 # Wake-on-LAN
