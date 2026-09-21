@@ -32,6 +32,8 @@ def send_command(command, parameters):
 def execute(action, target):
     if action == "wake":
         wake_pc()
+    elif action == "shutdown":
+        return send_command("shutdown", {})
     else:
         return send_command(action, {"name": target})
 

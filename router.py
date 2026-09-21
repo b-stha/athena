@@ -17,6 +17,12 @@ DESKTOP_COMMANDS = {
     "open notepad": Action("desktop", "launch_app", "notepad", "application"),
     "turn on pc": Action("desktop", "wake", "pc", "device"),
     "turn on my pc": Action("desktop", "wake", "pc", "device"),
+    "shutdown pc": Action("desktop", "shutdown", "pc", "device"),
+    "shutdown my pc": Action("desktop", "shutdown", "pc", "device"),
+    "shut down pc": Action("desktop", "shutdown", "pc", "device"),
+    "shut down my pc": Action("desktop", "shutdown", "pc", "device"),
+    "turn off pc": Action("desktop", "shutdown", "pc", "device"),
+    "turn off my pc": Action("desktop", "shutdown", "pc", "device"),
 }
 
 TARGETS = {

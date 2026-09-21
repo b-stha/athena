@@ -45,7 +45,20 @@ HTTP or require the desktop process to be running. The PC must already be
 configured to support Wake-on-LAN. Sending a packet does not confirm startup.
 
 For a live test, configure the MAC address, put the PC in a wake-capable state,
-then issue either command from Athena and observe the PC. No automatic retries,
-startup detection, or PC shutdown commands are implemented.
+then issue either command from Athena and observe the PC. No automatic retries
+or startup detection are implemented. Shutdown requests use the separate HTTP path
+described below.
 
 Packet format reference: [AMD Magic Packet Technology](https://www.amd.com/content/dam/amd/en/documents/archived-tech-docs/white-papers/20213.pdf).
+
+# Shutdown command
+
+Core accepts `shutdown PC`, `shut down PC`, and `turn off PC`, also with `my PC`.
+These send `POST /commands` with `command: "shutdown"`, an empty `parameters`
+object, and a generated request ID. The desktop client must implement this command.
+Core reports acceptance only when the matching response contains `success: true`.
+It does not wake an unreachable PC or retry a failed request. Acknowledgment is
+not proof that Windows finished shutting down.
+
+To test against a shutdown-capable client, run `./run.sh --text` and enter
+`shutdown pc`. This requests real PC shutdown; save your desktop work first.

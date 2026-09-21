@@ -43,7 +43,7 @@ class WakeOnLanTests(unittest.TestCase):
             for command in ["turn on PC", "  TURN on my PC  "]:
                 self.assertEqual(route(command).backend, "desktop")
             self.assertEqual(wake.call_count, 2)
-            for command in ["turn off pc", "turn onn pc"]:
+            for command in ["turn of pc", "turn onn pc"]:
                 with self.assertRaises(ValueError):
                     route(command)
             self.assertEqual(wake.call_count, 2)

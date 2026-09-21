@@ -53,6 +53,8 @@ def main():
             else:
                 if action.backend == "desktop" and action.action == "wake":
                     print("Wake packet sent. PC startup is not confirmed.")
+                elif action.backend == "desktop" and action.action == "shutdown":
+                    print("Shutdown accepted by the desktop client.")
                 else:
                     print(f"Done: {action.action} {action.target}")
     except (EOFError, KeyboardInterrupt):
