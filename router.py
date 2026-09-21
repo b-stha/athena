@@ -20,7 +20,7 @@ DESKTOP_COMMANDS = {
 }
 
 TARGETS = {
-    "desk lights": ("entity_id", "light.nanoleafs"),
+    "nanoleafs": ("entity_id", "light.nanoleafs"),
     "table glow": ("entity_id", "light.table_glow"),
     "under glow": ("entity_id", "light.under_glow"),
     "bathroom": ("entity_id", "light.bathroom"),
@@ -28,11 +28,6 @@ TARGETS = {
 }
 
 ALIASES = {
-    "desk light": "desk lights",
-    "desks lights": "desk lights",
-    "nanoleafs": "desk lights",
-    "table glow lights": "table glow",
-    "under glow lights": "under glow",
     "underglow": "under glow",
     "bathroom lights": "bathroom",
     "bedroom lights": "bedroom",
@@ -63,10 +58,10 @@ def resolve_light_action(normalized):
     words = normalized.split(" ", 2)
     verb = " ".join(words[:2])
     if len(words) != 3 or verb not in ACTIONS:
-        raise ValueError("Unknown command. Try: turn on desk lights or open notepad")
+        raise ValueError("Unknown command. Try: turn on nanoleafs or open notepad")
 
     name = ALIASES.get(words[2], words[2])
     if name not in TARGETS:
-        raise ValueError("Unknown light or room. Try: desk lights, table glow, under glow, bedroom, or bathroom")
+        raise ValueError("Unknown light or room. Try: nanoleafs, table glow, under glow, bedroom, or bathroom")
     target_type, target = TARGETS[name]
     return Action("home_assistant", ACTIONS[verb], target, target_type)

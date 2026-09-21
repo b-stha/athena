@@ -17,7 +17,7 @@ class DesktopTests(unittest.TestCase):
 
     def test_light_commands_do_not_reach_desktop(self):
         with patch("router.desktop.send_command") as send, patch("router.home_assistant.call_service"):
-            route("turn on desk lights")
+            route("turn on nanoleafs")
             send.assert_not_called()
 
     def test_unknown_app_does_not_send(self):

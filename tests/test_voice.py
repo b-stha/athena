@@ -14,10 +14,10 @@ import main
 class TranscriptionTests(unittest.TestCase):
     def test_protocol_and_transcript(self):
         client = AsyncMock()
-        client.read_event.return_value = Transcript(text="Turn on desk lights.").event()
+        client.read_event.return_value = Transcript(text="Turn on nanoleafs.").event()
         client.__aenter__.return_value = client
         with patch.object(stt.AsyncClient, "from_uri", return_value=client):
-            self.assertEqual(stt.transcribe(b"\0" * 6400), "Turn on desk lights.")
+            self.assertEqual(stt.transcribe(b"\0" * 6400), "Turn on nanoleafs.")
         events = [call.args[0] for call in client.write_event.call_args_list]
         self.assertEqual([event.type for event in events],
                          ["transcribe", "audio-start", "audio-chunk", "audio-chunk", "audio-stop"])
@@ -99,17 +99,17 @@ class MainTests(unittest.TestCase):
         with patch("sys.argv", ["main.py"]), \
              patch("sys.stdin.isatty", return_value=True), \
              patch.object(microphone, "record", side_effect=[RuntimeError("capture failed"), b"a", b"b", KeyboardInterrupt()]), \
-             patch.object(stt, "transcribe", side_effect=["", "Turn on desk lights."]), \
+             patch.object(stt, "transcribe", side_effect=["", "Turn on nanoleafs."]), \
              patch("router.home_assistant.call_service") as service, redirect_stdout(output):
             main.main()
         service.assert_called_once_with("light", "turn_on", "light.nanoleafs")
-        self.assertIn("Heard: Turn on desk lights.", output.getvalue())
+        self.assertIn("Heard: Turn on nanoleafs.", output.getvalue())
         self.assertIn("No speech recognized", output.getvalue())
         self.assertIn("Goodbye.", output.getvalue())
 
     def test_text_mode(self):
         with patch("sys.argv", ["main.py", "--text"]), \
-             patch("builtins.input", side_effect=["turn on desk lights", "exit"]), \
+             patch("builtins.input", side_effect=["turn on nanoleafs", "exit"]), \
              patch("router.home_assistant.call_service") as service, redirect_stdout(io.StringIO()):
             main.main()
         service.assert_called_once_with("light", "turn_on", "light.nanoleafs")

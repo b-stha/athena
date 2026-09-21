@@ -22,7 +22,7 @@ def main():
             return
 
     print("Athena — Ctrl-C to quit." if not args.text else "Athena — type a command, or exit to quit.")
-    print("Try: turn on desk lights")
+    print("Try: turn on nanoleafs")
 
     try:
         while True:

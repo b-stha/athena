@@ -7,7 +7,7 @@ from router import route
 class RouterTests(unittest.TestCase):
     def test_on_and_off_for_each_target(self):
         targets = {
-            "desk lights": "light.nanoleafs",
+            "nanoleafs": "light.nanoleafs",
             "table glow": "light.table_glow",
             "under glow": "light.under_glow",
             "bathroom": "light.bathroom",
@@ -23,12 +23,12 @@ class RouterTests(unittest.TestCase):
 
     def test_device_alias_does_not_change_action(self):
         with patch("router.home_assistant.call_service") as call:
-            route("  TURN   OFF desks lights ")
-            call.assert_called_once_with("light", "turn_off", "light.nanoleafs")
+            route("  TURN   OFF bedroom lights ")
+            call.assert_called_once_with("light", "turn_off", area_id="bedroom")
 
     def test_unknown_actions_and_individual_bathroom_lights_are_rejected(self):
         with patch("router.home_assistant.call_service") as call:
-            for command in ["turn of desk lights", "turn onn desk lights", "toggle bedroom",
+            for command in ["turn of nanoleafs", "turn onn nanoleafs", "toggle bedroom",
                             "turn off bathroom light 1", "turn on", "turn on kitchen"]:
                 with self.subTest(command=command), self.assertRaises(ValueError):
                     route(command)

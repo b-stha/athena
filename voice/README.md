@@ -11,7 +11,7 @@ sudo apt-get install libportaudio2
 
 Press and release Space to start speaking, then press Space again to stop.
 Recording stops automatically after 30 seconds. Athena prints the Whisper transcript
-and passes it to the existing router. Say `turn on desk lights` to operate
+and passes it to the existing router. Say `turn on nanoleafs` to operate
 `light.nanoleafs`. Ctrl-C quits. `.venv/bin/python main.py --text` retains typed input.
 
 Whisper must already be running as a Wyoming service. The default endpoint is
