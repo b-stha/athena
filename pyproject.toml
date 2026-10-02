@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=66,<81", "wheel>=0.43,<1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "athena-ovos"
+version = "0.1.0"
+description = "OVOS voice frontend for Athena's Home Assistant and desktop backends"
+requires-python = ">=3.10"
+dynamic = ["dependencies"]
+
+[project.entry-points."opm.microphone"]
+athena-microphone = "athena_ovos.plugins:AthenaMicrophone"
+
+[project.entry-points."opm.stt"]
+athena-wyoming-whisper = "athena_ovos.plugins:AthenaWhisperSTT"
+
+# WebRTC VAD 0.0.1 still advertises the old ovos.plugin.VAD group.
+[project.entry-points."opm.VAD"]
+athena-webrtcvad = "ovos_vad_plugin_webrtcvad:WebRTCVAD"
+
+# Precise ONNX 0.1.0 advertises the old mycroft.plugin.wake_word group.
+[project.entry-points."opm.wake_word"]
+athena-precise-onnx = "athena_ovos.wake:AthenaPreciseWakeWord"
+
+[tool.setuptools]
+py-modules = ["router"]
+
+[tool.setuptools.packages.find]
+include = ["athena_ovos*", "athena_skill*", "integrations*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}

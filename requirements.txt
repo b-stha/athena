@@ -1,6 +1,16 @@
-requests>=2,<3
+# Core 2.x requires Workshop 7; messagebus 0.0.10 requires config 1.x.
+ovos-core==2.1.1
+ovos-workshop==7.0.6
+ovos-config==1.2.2
+ovos-messagebus==0.0.10
+ovos-bus-client==1.5.0
+ovos-plugin-manager==2.2.0
+ovos-dinkum-listener==0.5.0
+ovos-adapt-parser==1.0.9
+ovos-ww-plugin-precise-onnx==0.1.0
+ovos-vad-plugin-webrtcvad==0.0.1
+requests>=2.32,<3
 python-dotenv>=1,<2
 sounddevice>=0.5,<0.6
 wyoming>=1.7,<2
-rapidfuzz>=3,<4
-webrtcvad-wheels>=2.0.14,<3
+numpy>=1.26,<2
