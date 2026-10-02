@@ -1,9 +1,0 @@
-services:
-  wake:
-    image: rhasspy/wyoming-openwakeword:2.1.0
-    ports:
-      - "127.0.0.1:10400:10400"
-    volumes:
-      - ./models:/custom:ro
-    command: ["--custom-model-dir", "/custom"]
-    restart: unless-stopped

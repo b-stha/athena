@@ -8,6 +8,8 @@ if [[ ! -x .venv/bin/python ]]; then
     echo "Athena's virtual environment is missing. Run these commands in $athena_dir:" >&2
     echo "  python3 -m venv .venv" >&2
     echo "  .venv/bin/python -m pip install -r requirements.txt" >&2
+    echo "  .venv/bin/python -m pip install -e ." >&2
+    echo "  .venv/bin/python -m athena_ovos.setup" >&2
     exit 1
 fi
 

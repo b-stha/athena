@@ -9,6 +9,9 @@ description = "OVOS voice frontend for Athena's Home Assistant and desktop backe
 requires-python = ">=3.10"
 dynamic = ["dependencies"]
 
+[project.entry-points."opm.skill"]
+athena-skill = "athena_skill:AthenaSkill"
+
 [project.entry-points."opm.microphone"]
 athena-microphone = "athena_ovos.plugins:AthenaMicrophone"
 
