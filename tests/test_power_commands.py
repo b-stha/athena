@@ -9,7 +9,7 @@ import main
 from integrations import desktop
 from resolver import resolve
 from router import route, voice_targets
-from voice import input as microphone
+from voice import wake as wake_input
 from voice import stt
 
 
@@ -92,11 +92,11 @@ class PowerCommandTests(unittest.TestCase):
 
     def test_voice_transcripts_reach_power_commands(self):
         for action in self.phrases:
-            transcript = f"{action.capitalize()}, my PC."
+            transcript = f"Athena, {action.capitalize()}, my PC."
             output = io.StringIO()
             with self.subTest(action=action), patch("sys.argv", ["main.py"]), \
                  patch("sys.stdin.isatty", return_value=True), \
-                 patch.object(microphone, "record", side_effect=[b"audio", KeyboardInterrupt()]), \
+                 patch.object(wake_input, "record", side_effect=[b"audio", KeyboardInterrupt()]), \
                  patch.object(stt, "transcribe", return_value=transcript), \
                  patch("router.desktop.send_command") as send, \
                  patch("router.desktop.wake_pc") as wake, redirect_stdout(output):

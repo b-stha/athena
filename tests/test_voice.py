@@ -10,6 +10,7 @@ from wyoming.asr import Transcript
 
 from voice import input as microphone
 from voice import stt
+from voice import wake
 import main
 
 
@@ -122,7 +123,7 @@ class RecordingTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     def test_main_transcribes_then_resolves_app_name(self):
         output = io.StringIO()
-        with patch("sys.argv", ["main.py"]), \
+        with patch("sys.argv", ["main.py", "--manual"]), \
              patch("sys.stdin.isatty", return_value=True), \
              patch.object(microphone, "record", side_effect=[b"audio", KeyboardInterrupt()]), \
              patch.object(stt, "transcribe", return_value="Open node pad.") as transcribe, \
@@ -135,7 +136,7 @@ class MainTests(unittest.TestCase):
 
     def test_transcript_reaches_router_after_error_and_empty_input(self):
         output = io.StringIO()
-        with patch("sys.argv", ["main.py"]), \
+        with patch("sys.argv", ["main.py", "--manual"]), \
              patch("sys.stdin.isatty", return_value=True), \
              patch.object(microphone, "record", side_effect=[RuntimeError("capture failed"), b"a", b"b", KeyboardInterrupt()]), \
              patch.object(stt, "transcribe", side_effect=["", "Turn on nanoleafs."]), \
@@ -148,6 +149,95 @@ class MainTests(unittest.TestCase):
 
     def test_text_mode(self):
         with patch("sys.argv", ["main.py", "--text"]), \
+             patch("builtins.input", side_effect=["turn on nanoleafs", "exit"]), \
+             patch("router.home_assistant.call_service") as service, redirect_stdout(io.StringIO()):
+            main.main()
+        service.assert_called_once_with("light", "turn_on", "light.nanoleafs")
+
+    def test_default_wake_mode_works_without_a_terminal(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["main.py"]), \
+             patch("sys.stdin.isatty", return_value=False) as isatty, \
+             patch.object(wake, "record", side_effect=[b"audio", KeyboardInterrupt()]) as record, \
+             patch.object(wake, "strip_wake_phrase", return_value="turn on nanoleafs") as strip, \
+             patch.object(stt, "transcribe", return_value="Athena, turn on nanoleafs.") as transcribe, \
+             patch("router.home_assistant.call_service") as service, redirect_stdout(output):
+            main.main()
+        isatty.assert_not_called()
+        self.assertEqual(record.call_count, 2)
+        transcribe.assert_called_once_with(b"audio")
+        strip.assert_called_once_with("Athena, turn on nanoleafs.")
+        service.assert_called_once_with("light", "turn_on", "light.nanoleafs")
+        self.assertIn("Heard: Athena, turn on nanoleafs.", output.getvalue())
+
+    def test_empty_automatic_capture_skips_transcription(self):
+        with patch("sys.argv", ["main.py"]), \
+             patch.object(wake, "record", side_effect=[b"", b"audio", KeyboardInterrupt()]), \
+             patch.object(wake, "strip_wake_phrase", side_effect=lambda text: text), \
+             patch.object(stt, "transcribe", return_value="turn on nanoleafs") as transcribe, \
+             patch("router.home_assistant.call_service") as service, redirect_stdout(io.StringIO()):
+            main.main()
+        transcribe.assert_called_once_with(b"audio")
+        service.assert_called_once_with("light", "turn_on", "light.nanoleafs")
+
+    def test_wake_only_transcript_does_not_route_a_command(self):
+        with patch("sys.argv", ["main.py"]), \
+             patch.object(wake, "record", side_effect=[b"audio", KeyboardInterrupt()]), \
+             patch.object(wake, "strip_wake_phrase", return_value=""), \
+             patch.object(stt, "transcribe", return_value="Athena."), \
+             patch.object(main, "route") as route, redirect_stdout(io.StringIO()):
+            main.main()
+        route.assert_not_called()
+
+    def test_wake_setup_error_stops_instead_of_retrying_forever(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["main.py"]), \
+             patch.object(wake, "record", side_effect=wake.WakeSetupError("Unknown wake model.")) as record, \
+             patch.object(main, "route") as route, redirect_stdout(output):
+            result = main.main()
+        self.assertEqual(result, 1)
+        record.assert_called_once_with()
+        route.assert_not_called()
+        self.assertIn("Unknown wake model", output.getvalue())
+
+    def test_manual_mode_requires_a_terminal(self):
+        with patch("sys.argv", ["main.py", "--manual"]), \
+             patch("sys.stdin.isatty", return_value=False), \
+             patch.object(microphone, "record") as record, redirect_stdout(io.StringIO()):
+            main.main()
+        record.assert_not_called()
+
+    def test_sigterm_stops_recording_and_restores_original_signal_handler(self):
+        handlers = {}
+        previous = object()
+
+        def register_signal(signum, handler):
+            handlers[signum] = handler
+            return previous
+
+        def stopped_recording():
+            handlers[main.signal.SIGTERM](main.signal.SIGTERM, None)
+
+        with patch("sys.argv", ["main.py"]), \
+             patch.object(main.signal, "signal", side_effect=register_signal) as register, \
+             patch.object(wake, "record", side_effect=stopped_recording), \
+             patch.object(main, "route") as route, redirect_stdout(io.StringIO()):
+            result = main.main()
+        self.assertEqual(result, 0)
+        route.assert_not_called()
+        self.assertEqual(register.call_count, 2)
+        register.assert_called_with(main.signal.SIGTERM, previous)
+
+    def test_text_mode_does_not_import_voice_dependencies(self):
+        original_import = __import__
+
+        def import_without_voice(name, *args, **kwargs):
+            if name == "voice" or name.startswith("voice."):
+                raise ImportError("Audio dependencies are deliberately unavailable.")
+            return original_import(name, *args, **kwargs)
+
+        with patch("sys.argv", ["main.py", "--text"]), \
+             patch("builtins.__import__", side_effect=import_without_voice), \
              patch("builtins.input", side_effect=["turn on nanoleafs", "exit"]), \
              patch("router.home_assistant.call_service") as service, redirect_stdout(io.StringIO()):
             main.main()
