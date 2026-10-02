@@ -1,7 +1,6 @@
 """Spacebar-controlled recording from the local microphone (Linux terminal)."""
 
 import os
-from array import array
 import select
 import sys
 import termios
@@ -10,13 +9,8 @@ import tty
 
 import sounddevice as sd
 
-SAMPLE_RATE = 16000
-SAMPLE_WIDTH = 2
-CHANNELS = 1  # Mono audio sent to Whisper.
-CAPTURE_CHANNELS = 2
-SOURCE_CHANNEL = 2
-INPUT_DEVICE = "reSpeaker Flex XVF3800"
-MAX_SECONDS = 30
+from voice.audio import (CAPTURE_CHANNELS, CHANNELS, INPUT_DEVICE, MAX_SECONDS,
+                         SAMPLE_RATE, SAMPLE_WIDTH, SOURCE_CHANNEL, source_audio)
 
 
 def record():
@@ -32,9 +26,7 @@ def record():
     def capture(data, frames, timing, status):
         if status:
             errors.append(str(status))
-        samples = array("h")
-        samples.frombytes(bytes(data))
-        chunks.append(samples[SOURCE_CHANNEL - 1::CAPTURE_CHANNELS].tobytes())
+        chunks.append(source_audio(data))
 
     try:
         tty.setcbreak(fd)

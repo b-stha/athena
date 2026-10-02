@@ -10,7 +10,7 @@ from wyoming.asr import Transcribe, Transcript
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.client import AsyncClient
 
-from voice.input import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH
+from voice.audio import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH
 
 load_dotenv()
 
