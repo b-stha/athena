@@ -9,8 +9,6 @@ import main
 from integrations import desktop
 from resolver import resolve
 from router import route, voice_targets
-from voice import wake as wake_input
-from voice import stt
 
 
 class PowerCommandTests(unittest.TestCase):
@@ -88,22 +86,6 @@ class PowerCommandTests(unittest.TestCase):
                  patch("router.desktop.send_command", return_value={"success": True}), \
                  redirect_stdout(output):
                 main.main()
-            self.assertIn(f"{action.capitalize()} accepted by the desktop client.", output.getvalue())
-
-    def test_voice_transcripts_reach_power_commands(self):
-        for action in self.phrases:
-            transcript = f"Athena, {action.capitalize()}, my PC."
-            output = io.StringIO()
-            with self.subTest(action=action), patch("sys.argv", ["main.py"]), \
-                 patch("sys.stdin.isatty", return_value=True), \
-                 patch.object(wake_input, "record", side_effect=[b"audio", KeyboardInterrupt()]), \
-                 patch.object(stt, "transcribe", return_value=transcript), \
-                 patch("router.desktop.send_command") as send, \
-                 patch("router.desktop.wake_pc") as wake, redirect_stdout(output):
-                main.main()
-            send.assert_called_once_with(action, {})
-            wake.assert_not_called()
-            self.assertIn(f"Heard: {transcript}", output.getvalue())
             self.assertIn(f"{action.capitalize()} accepted by the desktop client.", output.getvalue())
 
     def test_unsupported_targets_do_not_execute_power_commands(self):

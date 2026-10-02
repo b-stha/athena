@@ -1,96 +1,80 @@
 import argparse
+import os
+from pathlib import Path
 import signal
 import sys
-import time
 
+from dotenv import load_dotenv
 from requests.exceptions import RequestException
 
-from router import route, voice_targets
+
+def text_mode():
+    from router import route
+    print("Athena - type a command, or exit to quit.")
+    while True:
+        try:
+            command = input("athena> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return 0
+        if command.lower() in {"exit", "quit"}:
+            return 0
+        if not command:
+            continue
+        try:
+            action = route(command)
+            if action.backend == "desktop" and action.action == "wake":
+                print("Wake packet sent. PC startup is not confirmed.")
+            elif action.backend == "desktop" and action.action in {"shutdown", "restart", "sleep"}:
+                print(f"{action.action.capitalize()} accepted by the desktop client.")
+            else:
+                print(f"Done: {action.action} {action.target}")
+        except (ValueError, RequestException) as error:
+            print(f"Command failed: {error}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Athena voice commands")
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--text", action="store_true", help="type commands instead of recording")
-    modes.add_argument("--manual", action="store_true", help="use Space to start and stop recording")
+    root = Path(__file__).resolve().parent
+    load_dotenv(root / ".env")
+    parser = argparse.ArgumentParser(description="Athena's OVOS voice frontend")
+    parser.add_argument("--text", action="store_true", help="type commands to test the backends")
+    parser.add_argument("--model", type=Path, help="use a different Precise Athena ONNX model")
+    parser.add_argument("--mic-device", default="reSpeaker Flex XVF3800", help="PortAudio microphone name")
+    parser.add_argument("--bus-port", type=int, default=8181, help="local OVOS bus port")
+    parser.add_argument("--check-config", action="store_true", help="validate plugins and model without recording")
     args = parser.parse_args()
-    fatal_voice_errors = ()
-    if not args.text:
-        if args.manual and not sys.stdin.isatty():
-            print("Manual recording requires an interactive terminal. Use wake-word mode or --text.")
-            return 1
-        try:
-            if args.manual:
-                from voice.input import record
-            else:
-                from voice.wake import record, strip_wake_phrase, WakeSetupError
-                fatal_voice_errors = (WakeSetupError,)
-            from voice.stt import transcribe
-            from resolver import normalize, resolve
-        except (ImportError, OSError) as error:
-            print(f"Voice setup unavailable: {error}. See voice/README.md or use --text.")
-            return 1
-
-    print("Athena — Ctrl-C to quit." if not args.text else "Athena — type a command, or exit to quit.")
-    print("Try: turn on nanoleafs")
 
     def stop(signum, frame):
         raise KeyboardInterrupt
-
-    previous_sigterm = signal.signal(signal.SIGTERM, stop)
+    previous = signal.signal(signal.SIGTERM, stop)
     try:
-        while True:
-            if args.text:
-                command = input("athena> ").strip()
-            else:
-                try:
-                    audio = record()
-                    if not audio:
-                        print("No command heard. Listening again.")
-                        continue
-                    print("Transcribing...", flush=True)
-                    transcript = transcribe(audio)
-                    print(f"Heard: {transcript}" if transcript else "No speech recognized. Try again.")
-                    spoken_command = transcript if args.manual else strip_wake_phrase(transcript)
-                    command = resolve(spoken_command, voice_targets())
-                    if command != normalize(spoken_command):
-                        print(f"Matched: {command}")
-                except fatal_voice_errors as error:
-                    print(f"Wake-word setup unavailable: {error}. See voice/README.md.")
-                    return 1
-                except RuntimeError as error:
-                    print(error)
-                    if not args.manual:
-                        time.sleep(1)
-                    continue
-                except ValueError as error:
-                    print(error)
-                    continue
-            if command.lower() in {"exit", "quit"}:
-                break
-            if not command:
-                continue
-
+        if args.text:
+            return text_mode()
+        from athena_ovos.runtime import check_plugins, prepare_environment, run
+        env, config = prepare_environment(root, args.model, device=args.mic_device, bus_port=args.bus_port)
+        os.environ.update(env)
+        check_plugins()
+        if args.check_config:
+            from ovos_plugin_manager.microphone import OVOSMicrophoneFactory
+            from ovos_plugin_manager.stt import OVOSSTTFactory
+            from ovos_plugin_manager.vad import OVOSVADFactory
+            from ovos_plugin_manager.wakewords import OVOSWakeWordFactory
+            microphone = OVOSMicrophoneFactory.create()
+            OVOSVADFactory.create().is_silence(bytes(microphone.chunk_size))
+            OVOSSTTFactory.create()
             try:
-                action = route(command)
-            except RequestException:
-                print("Service request failed. Check the connection and configuration, then try again.")
-            except ValueError as error:
-                print(error)
-            else:
-                if action.backend == "desktop" and action.action == "wake":
-                    print("Wake packet sent. PC startup is not confirmed.")
-                elif action.backend == "desktop" and action.action in {"shutdown", "restart", "sleep"}:
-                    print(f"{action.action.capitalize()} accepted by the desktop client.")
-                else:
-                    print(f"Done: {action.action} {action.target}")
-    except (EOFError, KeyboardInterrupt):
-        print()
+                OVOSWakeWordFactory.create_hotword("athena")
+            except Exception as error:
+                raise ValueError(f"Cannot load Athena's wake model: {error}") from error
+            print("Athena's OVOS plugins and wake model are ready. Microphone was not opened.")
+            return 0
+        return run(root, env, config)
+    except KeyboardInterrupt:
+        return 0
+    except (ImportError, OSError, RuntimeError, ValueError) as error:
+        print(f"Athena setup failed: {error}. See voice/README.md.", file=sys.stderr)
+        return 1
     finally:
-        signal.signal(signal.SIGTERM, previous_sigterm)
-
-    print("Goodbye.")
-    return 0
+        signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == "__main__":
