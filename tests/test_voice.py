@@ -94,6 +94,19 @@ class RecordingTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
+    def test_main_transcribes_then_resolves_app_name(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["main.py"]), \
+             patch("sys.stdin.isatty", return_value=True), \
+             patch.object(microphone, "record", side_effect=[b"audio", KeyboardInterrupt()]), \
+             patch.object(stt, "transcribe", return_value="Open node pad.") as transcribe, \
+             patch("router.desktop.execute") as execute, redirect_stdout(output):
+            main.main()
+        transcribe.assert_called_once_with(b"audio")
+        execute.assert_called_once_with("launch_app", "notepad")
+        self.assertIn("Heard: Open node pad.", output.getvalue())
+        self.assertIn("Matched: open notepad", output.getvalue())
+
     def test_transcript_reaches_router_after_error_and_empty_input(self):
         output = io.StringIO()
         with patch("sys.argv", ["main.py"]), \

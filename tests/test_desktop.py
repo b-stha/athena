@@ -8,6 +8,22 @@ from router import route
 
 
 class DesktopTests(unittest.TestCase):
+    def test_router_requires_canonical_app_name(self):
+        with patch("router.desktop.execute") as execute:
+            for command in ["open no pad", "open note pad", "open node pad"]:
+                with self.subTest(command=command), self.assertRaises(ValueError):
+                    route(command)
+            execute.assert_not_called()
+
+    def test_aliases_do_not_correct_actions_or_partial_targets(self):
+        with patch("router.desktop.execute") as execute, patch("router.home_assistant.call_service") as ha:
+            for command in ["close no pad", "opn no pad", "don't open no pad",
+                            "turn on no pad", "open no pad and shutdown", "open pad"]:
+                with self.subTest(command=command), self.assertRaises(ValueError):
+                    route(command)
+            execute.assert_not_called()
+            ha.assert_not_called()
+
     def test_routes_to_desktop_only(self):
         with patch("router.desktop.send_command") as send, patch("router.home_assistant.call_service") as ha:
             action = route("  OPEN   Notepad ")

@@ -6,7 +6,8 @@ from unittest.mock import patch
 import requests
 
 import main
-from router import route
+from resolver import resolve
+from router import route, voice_targets
 
 
 class ShutdownTests(unittest.TestCase):
@@ -16,7 +17,8 @@ class ShutdownTests(unittest.TestCase):
             with self.subTest(phrase=phrase), patch("router.desktop.send_command") as send, \
                  patch("router.desktop.wake_pc") as wake, \
                  patch("router.home_assistant.call_service") as ha:
-                action = route(phrase)
+                command = resolve(phrase, voice_targets())
+                action = route(command)
                 self.assertEqual(action.action, "shutdown")
                 send.assert_called_once_with("shutdown", {})
                 wake.assert_not_called()
