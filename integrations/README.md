@@ -48,19 +48,27 @@ configured to support Wake-on-LAN. Sending a packet does not confirm startup.
 
 For a live test, configure the MAC address, put the PC in a wake-capable state,
 then issue either command from Athena and observe the PC. No automatic retries
-or startup detection are implemented. Shutdown requests use the separate HTTP path
+or startup detection are implemented. Power requests use the separate HTTP path
 described below.
 
 Packet format reference: [AMD Magic Packet Technology](https://www.amd.com/content/dam/amd/en/documents/archived-tech-docs/white-papers/20213.pdf).
 
-# Shutdown command
+# Power commands
 
-Core accepts `shutdown PC`, `shut down PC`, and `turn off PC`, also with `my PC`.
-These send `POST /commands` with `command: "shutdown"`, an empty `parameters`
-object, and a generated request ID. The desktop client must implement this command.
+Core accepts these commands in text and voice mode:
+
+| Action | Phrases |
+| --- | --- |
+| Shutdown | `shutdown pc`, `shut down pc`, `turn off pc`, also with `my pc` |
+| Restart | `restart pc`, `restart my pc` |
+| Sleep | `sleep pc`, `sleep my pc` |
+
+Each sends `POST /commands` with the respective `command` value (`shutdown`,
+`restart`, or `sleep`), an empty `parameters` object, and a generated request ID.
+The desktop client must register the corresponding power-command handlers.
 Core reports acceptance only when the matching response contains `success: true`.
-It does not wake an unreachable PC or retry a failed request. Acknowledgment is
-not proof that Windows finished shutting down.
+It does not wake an unreachable PC or retry a failed request. Acknowledgment
+confirms acceptance of the request, not completion of the Windows power action.
 
-To test against a shutdown-capable client, run `./run.sh --text` and enter
-`shutdown pc`. This requests real PC shutdown; save your desktop work first.
+To test against a power-capable client, run `./run.sh --text` and enter one of the
+commands above. These request real PC power actions; save your desktop work first.

@@ -1,6 +1,6 @@
 # Athena
 
-Athena is a Python personal assistant hosted on a Raspberry Pi 5. It processes speech locally and routes supported commands to Home Assistant for lighting control or to a C#/.NET Windows desktop agent for application launching. It can also send Wake-on-LAN packets without the desktop agent running.
+Athena is a Python personal assistant hosted on a Raspberry Pi 5. It processes speech locally and routes supported commands to Home Assistant for lighting control or to a C#/.NET Windows desktop agent for application launching and power commands. It can also send Wake-on-LAN packets without the desktop agent running.
 
 ## Architecture
 
@@ -16,6 +16,7 @@ flowchart TD
     HA --> Lights["Lights and rooms"]
     HTTP --> Desktop["C#/.NET Windows agent"]
     Desktop --> Apps["Configured applications"]
+    Desktop --> Power["Shutdown, restart, sleep"]
     WOL --> PC["Wake-capable PC"]
 ```
 
@@ -29,7 +30,7 @@ The Raspberry Pi handles recording, transcription, speech target matching, and r
 - Deterministic lighting commands for Nanoleaf desk lights (`nanoleafs`), Govee Table Glow and Under Glow, the Bedroom area, and grouped Philips Hue bathroom lights.
 - Desktop application launching over HTTP, with generated request IDs, response validation, a five-second timeout, and no automatic retries.
 - Wake-on-LAN through a UDP magic packet; sending a packet does not confirm PC startup.
-- Core-side shutdown command routing and transport. Execution requires a desktop client that implements `shutdown`; acknowledgment does not confirm completed shutdown.
+- Core-side shutdown, restart, and sleep command routing and transport. Execution requires the corresponding desktop handlers; acknowledgment does not confirm completion of the power action.
 - Automated tests for routing, desktop transport, Wake-on-LAN, power commands, speech matching, recording controls, transcription, and error handling.
 
 Example commands:
@@ -41,6 +42,9 @@ Example commands:
 - `turn on bathroom lights`
 - `open notepad`
 - `turn on my pc`
+- `shutdown pc`
+- `restart my pc`
+- `sleep pc`
 
 ## Running
 
@@ -52,7 +56,7 @@ Install the Python requirements and configure the required services before start
 ./run.sh --text
 ```
 
-See [voice setup](voice/README.md) for microphone and Whisper requirements, and [desktop integration](integrations/README.md) for HTTP, Wake-on-LAN, and shutdown configuration. Home Assistant uses `HA_URL` and `HA_TOKEN` from `.env`.
+See [voice setup](voice/README.md) for microphone and Whisper requirements, and [desktop integration](integrations/README.md) for HTTP, Wake-on-LAN, and power-command configuration. Home Assistant uses `HA_URL` and `HA_TOKEN` from `.env`.
 
 Run automated checks with:
 

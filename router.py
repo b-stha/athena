@@ -23,6 +23,10 @@ DESKTOP_COMMANDS = {
     "shut down my pc": Action("desktop", "shutdown", "pc", "device"),
     "turn off pc": Action("desktop", "shutdown", "pc", "device"),
     "turn off my pc": Action("desktop", "shutdown", "pc", "device"),
+    "restart pc": Action("desktop", "restart", "pc", "device"),
+    "restart my pc": Action("desktop", "restart", "pc", "device"),
+    "sleep pc": Action("desktop", "sleep", "pc", "device"),
+    "sleep my pc": Action("desktop", "sleep", "pc", "device"),
 }
 
 TARGETS = {
