@@ -1,97 +1,168 @@
-# Voice input
+# Voice frontend
 
-Athena listens for the single word **Athena**, records the following command,
-and stops after 0.8 seconds of silence. Wake detection uses a local Wyoming
-openWakeWord service. Whisper receives only the resulting command recording.
-Run on the machine with the microphone attached; SSH does not forward your
-laptop microphone. Default voice mode does not require an interactive terminal.
+OVOS manages Athena's microphone input, wake detection, recording, speech
+endpointing, STT coordination and intent dispatch. The existing local Whisper
+server performs transcription. Athena supplies microphone and Wyoming STT
+plugins plus a small adapter for OVOS's Precise detector. The previous standalone
+recording and openWakeWord loop is retired.
 
-## Setup
+Run on the Pi with the microphone attached. SSH does not forward the PC's
+microphone, and voice mode does not need an interactive terminal.
 
-First train an openWakeWord model for `athena` and save the TFLite output as
-`voice/models/athena.tflite`. See [custom model setup](models/README.md).
-Changing a model filename does not change the phrase it recognizes. A model for
-"Hey Athena" cannot be substituted for the single-word model.
+## Install
+
+From the repository on the Pi:
 
 ```bash
-sudo apt-get install libportaudio2
+sudo apt-get install python3-venv libportaudio2
+python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-docker compose -f voice/compose.yaml up -d
-.venv/bin/python main.py
+.venv/bin/python -m pip install -e .
+.venv/bin/python -m athena_ovos.setup
 ```
 
-Say `Athena, turn on nanoleafs`. Audio around the detection is retained so a
-command spoken immediately after the word is not intentionally cut off. After
-detection, Athena waits up to five seconds for speech. Recordings with less than
-100 ms of speech are discarded; commands have a 30-second limit. WebRTC VAD checks
-raw audio for speech before normalization. The microphone closes during
-transcription and command execution, then reopens to listen for another wake word.
+The setup command downloads a pinned version of the existing community
+single-word **Athena** Precise ONNX model into `.ovos`. No `athena.tflite` or
+custom openWakeWord training is needed. This is an existing model whose
+recognition accuracy with your voice, microphone and room still needs a live
+check.
 
-Athena prints the original Whisper transcript
-and resolves its target before passing the command to the router. Say `turn on nanoleafs` to operate
-`light.nanoleafs`. Only a leading `Athena` is removed from the transcript before
-resolution. Ctrl-C or SIGTERM stops the program and closes audio resources.
-`.venv/bin/python main.py --text` retains typed input. For the previous keyboard
-controls, use `.venv/bin/python main.py --manual` from an interactive Linux terminal:
-press and release Space to start speaking, then press Space again to stop.
-
-The default wake endpoint is `tcp://127.0.0.1:10400`; `voice/compose.yaml` binds it
-only to the Pi's loopback interface and mounts the model directory read-only.
-The service must be started separately. It does not start automatically with Athena.
-Set these in `.env` to use another endpoint or model:
+Keep the existing Wyoming Whisper server running. Its default address is
+`tcp://127.0.0.1:10300`, matching the Pi's current Whisper Docker service. Override
+it in the repository's `.env` if necessary:
 
 ```dotenv
-WAKE_URI=tcp://127.0.0.1:10400
-WAKE_WORD=athena
-WAKE_PHRASE=Athena
+WHISPER_URI=tcp://127.0.0.1:10300
 ```
 
-`WAKE_WORD` is the model ID reported by the service, normally the TFLite filename
-without its extension. `WAKE_PHRASE` is the spoken text removed from the transcript;
-its default is the model name with underscores replaced by spaces. Athena checks
-the service's model list before opening the microphone and exits with an error if
-the selected model is missing. It never silently switches to a built-in wake word.
-Restart the wake service after adding or replacing a model.
+Backend settings such as `HA_URL`, `HA_TOKEN`, `DESKTOP_URL` and the Wake-on-LAN
+configuration remain in `.env`. Athena loads them before starting OVOS services.
+OVOS configuration and caches are isolated under `.ovos`, leaving other OVOS
+installations' settings separate.
 
-Whisper must already be running as a Wyoming service. The default endpoint is
-`tcp://127.0.0.1:10300`, matching the port in `/home/MK/docker/whisper/compose.yaml`.
-Set `WHISPER_URI` in `.env` if it runs elsewhere. The client does not start Docker
-or load a model. Requests use English and have a 120-second overall timeout.
+## Validate and start
 
-`audio.py` defines the 16 kHz audio format and selects physical channel 2 from
-the first two channels of the reSpeaker Flex XVF3800 as 16-bit mono PCM.
-`wake.py` streams this channel to wake detection and uses a bounded in-memory
-buffer for automatic command recording. Capture failures or buffer overflow
-discard the recording. `input.py` provides the optional Space-controlled recorder.
-`stt.py` peak-normalizes each recording to -1 dBFS in memory (equivalent to
-`sox gain -n -1`), sends a Wyoming transcription request and audio events, then returns the
-transcript. Audio stays in memory and is discarded after the interaction.
-`main.py` calls `transcribe()` first, displays the original transcript, then calls
-`resolve()` in the project-root `resolver.py` before routing. The resolver accepts
-text and the router's target vocabulary; it does not record, transcribe, or print.
-RapidFuzz's Levenshtein distance functions provide the matching scores.
-Action phrases must match exactly. Target comparison ignores spaces and uses edit distance:
-at most five edits and 65% of the longer name, with no approximate matching for input
-names shorter than five characters. Competing matches need a similarity gap of at least
-0.15; otherwise the request is rejected for clarification. These are initial heuristic
-thresholds, not confidence probabilities. A changed command is shown as `Matched:`.
+```bash
+./run.sh --check-config
+./run.sh
+```
 
-For example, `open no pad`, `open node pad`, and `open note pad` resolve to
-`open notepad` without per-app mishearing aliases. Text mode bypasses speech correction
-and requires commands accepted by the deterministic router. No LLM is used.
+`--check-config` verifies configuration, plugin loading and the wake model
+without opening the microphone or sending device commands. It does not verify
+the Whisper service, physical microphone or wake recognition accuracy.
 
-Run automated checks with `.venv/bin/python -m unittest discover -s tests`.
-The automated checks use fake audio, wake events and integrations; they do not
-verify the trained model's recognition accuracy. To verify hardware after installing
-the model, start the program, say `Athena, turn on nanoleafs`, and check the displayed
-transcript and light response. Also try the wake word without a command, ordinary
-speech without the wake word, an unsupported command, and Ctrl-C during recording.
-These live steps require an available microphone and services. Tune and retrain
-the wake model if it misses activations or triggers on background speech.
+The frontend starts OVOS's message bus, core and listener together. Say:
 
-Protocol reference: https://github.com/rhasspy/wyoming
-Capture reference: https://python-sounddevice.readthedocs.io/en/latest/api/raw-streams.html
-Wake service: https://github.com/rhasspy/wyoming-openwakeword
-Speech detection: https://github.com/wiseman/py-webrtcvad
+```text
+Athena, open notepad
+```
 
-Scoring reference: https://rapidfuzz.github.io/RapidFuzz/Usage/distance/Levenshtein.html
+Check the transcript and result in the terminal and confirm that Notepad opens on the PC.
+There is no TTS service in this migration, so Athena does not speak its result.
+Ctrl-C or SIGTERM stops the frontend and its managed OVOS processes.
+
+Optional runtime overrides:
+
+```bash
+./run.sh --mic-device 'reSpeaker Flex XVF3800'
+./run.sh --model /path/to/another-athena.onnx
+./run.sh --bus-port 8182
+```
+
+The default local message-bus port is 8181. A replacement model must be compatible
+with Precise ONNX and trained for the phrase you intend to say. Renaming an
+unrelated model does not change its wake phrase. The old `WAKE_URI`, `WAKE_WORD`
+and `WAKE_PHRASE` openWakeWord settings no longer select the detector.
+
+For typed command debugging:
+
+```bash
+./run.sh --text
+```
+
+Text mode skips the voice frontend and its model. `--manual` and Space-controlled
+recording are removed.
+
+## Microphone and recording
+
+`athena_ovos.plugins.AthenaMicrophone` opens the reSpeaker Flex XVF3800 as
+16 kHz, signed 16-bit stereo and selects physical **channel 2**. It supplies
+640-byte, 20 ms, little-endian mono chunks to the OVOS listener, without mixing
+the raw and processed channels.
+
+The Precise adapter accumulates these chunks into the model's 50 ms hops and
+waits for 1.5 seconds of audio to fill its feature history before allowing a wake
+activation. It avoids counting repeated predictions between feature updates.
+Allow that warmup after startup or a consumed wake activation. OVOS's Precise
+engine still performs the model inference.
+
+OVOS's listener performs wake detection using Precise ONNX and records the
+following command using WebRTC VAD. Its initial settings are:
+
+| Setting | Value |
+| --- | --- |
+| Minimum speech to begin a command | 0.1 seconds |
+| Silence to finish a command | 0.8 seconds |
+| Maximum wait for speech after the wake word | 5 seconds |
+| Maximum recording duration | 30 seconds |
+| Audio retained around wake detection | 200 ms |
+
+The microphone plugin supplies audio throughout the listener's lifecycle. Its
+bounded queue retains recent audio while OVOS is busy transcribing. OVOS owns
+the command buffer and decides when to start and finish recording; Athena does
+not run a second microphone recorder.
+
+`athena_ovos.plugins.AthenaWhisperSTT` receives the completed OVOS recording,
+converts it to 16 kHz, signed 16-bit mono and peak-normalizes it to -1 dBFS before
+sending Wyoming transcription events. It requests English, connects within
+five seconds and limits each transcription request to 120 seconds. Disconnects,
+server errors and timeouts are reported as failures.
+
+Stopping Athena discards an unfinished recording and joins the framework's
+buffer worker, without requesting transcription of that partial command.
+
+## Intents and contextual requests
+
+OVOS passes recognized speech to Athena's deterministic intent handlers. Those
+handlers validate their targets and invoke the existing Home Assistant, desktop
+HTTP or Wake-on-LAN integration. A recognized command that fails execution is
+reported as a failure.
+
+Requests that need context can reach `athena.context.request` on the message bus.
+The contextual reasoning and MCP consumer is a future component; this version
+does not execute a contextual fallback or send unmatched speech to a cloud LLM.
+
+## Testing
+
+After installing the package:
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
+
+Automated tests cover channel selection, audio format, the actual listener's
+recording states and STT wrapper, Wyoming requests, connection cleanup, timeouts
+and command handling through real OVOS core and message-bus processes.
+When the pinned model is installed, a regression check runs actual model
+inference on synthetic silence; otherwise that check is skipped with setup
+instructions.
+They use fake microphone frames and backend actions. They do not measure live
+wake recognition or your room's speech endpointing behavior.
+
+For a live check, start voice mode and try:
+
+1. `Athena, open notepad` and confirm the PC opens it.
+2. `Athena, turn on nanoleafs` and confirm the Home Assistant action.
+3. Say `Athena` without a command and wait for the speech timeout.
+4. Speak ordinary sentences without the wake word and check for false activation.
+5. Try an unsupported request and check that no device action executes.
+6. Stop Athena during listening with Ctrl-C and confirm its processes exit.
+
+Once command delivery works, save your PC work before saying `Athena, sleep PC`.
+The desktop client acknowledges the request before applying the power action;
+an acknowledgment does not confirm that Windows finished sleeping.
+
+References: [OVOS listener](https://github.com/OpenVoiceOS/ovos-dinkum-listener),
+[Precise ONNX plugin](https://github.com/OpenVoiceOS/ovos-ww-plugin-precise-onnx),
+[published wake models](https://github.com/OpenVoiceOS/precise-lite-models),
+[Wyoming](https://github.com/rhasspy/wyoming).
