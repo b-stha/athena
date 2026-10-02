@@ -83,6 +83,28 @@ For typed command debugging:
 Text mode skips the voice frontend and its model. `--manual` and Space-controlled
 recording are removed.
 
+## Wake sensitivity
+
+If background sounds cause false wake detections, stop the frontend and try:
+
+```bash
+./run.sh --wake-sensitivity 0.2 --wake-trigger-level 5
+```
+
+The defaults remain sensitivity `0.5` and trigger level `3`. Lower sensitivity
+makes Precise stricter: `0.2` requires a decoded model score above `0.8`, compared
+with `0.5` at the default. Increasing the trigger level requires more qualifying
+model predictions before activation. The counter decreases gradually when
+predictions fall below the threshold; it does not require consecutive matches.
+
+These settings are a starting point for testing with your voice and room sounds.
+Stricter settings can also miss a real `Athena`. Check both background-noise false
+activations and deliberate wake words before choosing values. The launcher
+prints the effective settings and rejects invalid ranges before starting OVOS.
+
+Use the flags on each launch. `.ovos/config/athena/mycroft.conf` is generated
+again at startup, so manual edits there do not persist through `./run.sh`.
+
 ## Microphone and recording
 
 `athena_ovos.plugins.AthenaMicrophone` opens the reSpeaker Flex XVF3800 as
