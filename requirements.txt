@@ -2,3 +2,4 @@ requests>=2,<3
 python-dotenv>=1,<2
 sounddevice>=0.5,<0.6
 wyoming>=1.7,<2
+rapidfuzz>=3,<4

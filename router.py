@@ -60,6 +60,16 @@ def route(command):
     return action
 
 
+def voice_targets():
+    """Expose accepted targets without putting speech matching in the router."""
+    targets = {verb: {name: name for name in TARGETS} | ALIASES for verb in ACTIONS}
+    for command in DESKTOP_COMMANDS:
+        verb = next((v for v in (*ACTIONS, "shut down") if command.startswith(v + " ")), command.split()[0])
+        name = command[len(verb) + 1:]
+        targets.setdefault(verb, {})[name] = name
+    return targets
+
+
 def resolve_light_action(normalized):
     words = normalized.split(" ", 2)
     verb = " ".join(words[:2])

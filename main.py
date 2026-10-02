@@ -3,7 +3,7 @@ import sys
 
 from requests.exceptions import RequestException
 
-from router import route
+from router import route, voice_targets
 
 
 def main():
@@ -17,6 +17,7 @@ def main():
         try:
             from voice.input import record
             from voice.stt import transcribe
+            from resolver import normalize, resolve
         except (ImportError, OSError) as error:
             print(f"Voice setup unavailable: {error}. See voice/README.md or use --text.")
             return
@@ -33,12 +34,13 @@ def main():
                     audio = record()
                     print("Transcribing...", flush=True)
                     transcript = transcribe(audio)
+                    print(f"Heard: {transcript}" if transcript else "No speech recognized. Try again.")
+                    command = resolve(transcript, voice_targets())
+                    if command != normalize(transcript):
+                        print(f"Matched: {command}")
                 except (RuntimeError, ValueError) as error:
                     print(error)
                     continue
-                print(f"Heard: {transcript}" if transcript else "No speech recognized. Try again.")
-                # Whisper may add sentence punctuation to a fixed command.
-                command = transcript.strip().rstrip(".!?").strip()
             if command.lower() in {"exit", "quit"}:
                 break
             if not command:
