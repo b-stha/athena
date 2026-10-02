@@ -1,5 +1,10 @@
 .venv/
 .env
 __pycache__/
+.ovos/
+*.egg-info/
+build/
+dist/
+# Preserve exclusions for any models downloaded before the OVOS migration.
 voice/models/*.tflite
 voice/models/*.onnx
