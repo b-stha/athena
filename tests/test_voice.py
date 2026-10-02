@@ -1,5 +1,7 @@
 import unittest
 import io
+import math
+import struct
 import tempfile
 from contextlib import redirect_stdout
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,8 +24,29 @@ class TranscriptionTests(unittest.TestCase):
         self.assertEqual([event.type for event in events],
                          ["transcribe", "audio-start", "audio-chunk", "audio-chunk", "audio-stop"])
         self.assertEqual(events[1].data["rate"], 16000)
+        self.assertEqual(events[1].data["channels"], 1)
         self.assertEqual(b"".join(event.payload for event in events[2:4]), b"\0" * 6400)
         client.__aexit__.assert_awaited_once()
+
+    def test_audio_is_peak_normalized_before_whisper(self):
+        self.assertAlmostEqual(20 * math.log10(stt.TARGET_PEAK / 32768), -1, places=2)
+        client = AsyncMock()
+        client.read_event.return_value = Transcript(text="Open notepad.").event()
+        client.__aenter__.return_value = client
+        audio = struct.pack("<4h", 1000, -500, 250, 0)
+        with patch.object(stt.AsyncClient, "from_uri", return_value=client):
+            self.assertEqual(stt.transcribe(audio), "Open notepad.")
+        chunks = [call.args[0].payload for call in client.write_event.call_args_list
+                  if call.args[0].type == "audio-chunk"]
+        samples = struct.unpack("<4h", b"".join(chunks))
+        self.assertEqual(samples[0], stt.TARGET_PEAK)
+        self.assertEqual(samples[1], -round(stt.TARGET_PEAK / 2))
+        self.assertEqual(samples[3], 0)
+
+    def test_silence_and_already_loud_audio(self):
+        self.assertEqual(stt.normalize_audio(b"\0" * 8), b"\0" * 8)
+        samples = struct.unpack("<2h", stt.normalize_audio(struct.pack("<2h", 30000, -15000)))
+        self.assertEqual(samples, (stt.TARGET_PEAK, -round(stt.TARGET_PEAK / 2)))
 
     def test_disconnect(self):
         client = AsyncMock()
@@ -78,7 +101,10 @@ class RecordingTests(unittest.TestCase):
         stdin.fileno.return_value = 10
 
         def stream(**kwargs):
-            kwargs["callback"](b"\0\0", 1, None, None)
+            self.assertEqual(kwargs["device"], microphone.INPUT_DEVICE)
+            self.assertEqual(kwargs["channels"], 2)
+            kwargs["callback"](b"\x01\x00\x02\x00\x03\x00\x04\x00",
+                               2, None, None)
             return MagicMock()
 
         with patch.object(microphone.sys, "stdin", stdin), \
@@ -89,7 +115,7 @@ class RecordingTests(unittest.TestCase):
              patch.object(microphone.termios, "tcsetattr") as restore, \
              patch.object(microphone.select, "select", return_value=([stdin], [], [])), \
              patch.object(microphone.sd, "RawInputStream", side_effect=stream):
-            self.assertEqual(microphone.record(), b"\0\0")
+            self.assertEqual(microphone.record(), b"\x02\x00\x04\x00")
         restore.assert_called_once()
 
 

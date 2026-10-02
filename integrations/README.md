@@ -6,8 +6,9 @@ Set `DESKTOP_URL` in Athena's `.env` to the desktop server's base address:
 DESKTOP_URL=http://YOUR_PC_LAN_IP:5000
 ```
 
-The desktop server must listen on that LAN address using `ATHENA_HTTP_PREFIX`;
-its default localhost binding cannot accept requests from the Pi.
+The desktop server must listen on that LAN address using `ATHENA_BIND_HOST`,
+or a complete URL override in `ATHENA_HTTP_PREFIX` (including a trailing slash).
+Its default localhost binding cannot accept requests from the Pi.
 The current server has no authentication, so use a trusted development network.
 
 Run `.venv/bin/python main.py --text` and enter `open notepad`.
@@ -25,9 +26,10 @@ The request has a five-second timeout and is not automatically retried.
 A successful response must contain the matching `requestId` and `success: true`.
 HTTP errors, failed commands, and mismatched responses do not report success.
 
-The [Athena Desktop](https://github.com/b-stha/athena-desktop) C#/.NET client
-now supports launching Notepad through `launch_app`. The full voice-to-desktop
-Notepad launch has been confirmed in live testing.
+The [Athena Desktop](https://github.com/b-stha/athena-desktop) C#/.NET agent
+implements `launch_app` and currently maps `notepad` to its Windows executable.
+The desktop README records a successful Pi-to-desktop HTTP launch test.
+Unsupported commands and application names return a failed command result.
 Existing Home Assistant light commands continue to use their own integration.
 
 # Wake-on-LAN

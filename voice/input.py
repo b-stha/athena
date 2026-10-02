@@ -1,6 +1,7 @@
 """Spacebar-controlled recording from the local microphone (Linux terminal)."""
 
 import os
+from array import array
 import select
 import sys
 import termios
@@ -11,7 +12,10 @@ import sounddevice as sd
 
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
-CHANNELS = 1
+CHANNELS = 1  # Mono audio sent to Whisper.
+CAPTURE_CHANNELS = 2
+SOURCE_CHANNEL = 2
+INPUT_DEVICE = "reSpeaker Flex XVF3800"
 MAX_SECONDS = 30
 
 
@@ -28,7 +32,9 @@ def record():
     def capture(data, frames, timing, status):
         if status:
             errors.append(str(status))
-        chunks.append(bytes(data))
+        samples = array("h")
+        samples.frombytes(bytes(data))
+        chunks.append(samples[SOURCE_CHANNEL - 1::CAPTURE_CHANNELS].tobytes())
 
     try:
         tty.setcbreak(fd)
@@ -41,7 +47,8 @@ def record():
             if key == b" ":
                 break
 
-        with sd.RawInputStream(samplerate=SAMPLE_RATE, channels=CHANNELS,
+        with sd.RawInputStream(device=INPUT_DEVICE, samplerate=SAMPLE_RATE,
+                               channels=CAPTURE_CHANNELS,
                                dtype="int16", callback=capture):
             print("Recording — press Space to stop (30-second limit).", flush=True)
             deadline = time.monotonic() + MAX_SECONDS

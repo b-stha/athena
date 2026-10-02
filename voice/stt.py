@@ -2,6 +2,8 @@
 
 import asyncio
 import os
+import sys
+from array import array
 
 from dotenv import load_dotenv
 from wyoming.asr import Transcribe, Transcript
@@ -11,6 +13,27 @@ from wyoming.client import AsyncClient
 from voice.input import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH
 
 load_dotenv()
+
+TARGET_DBFS = -1
+TARGET_PEAK = round(32767 * 10 ** (TARGET_DBFS / 20))
+
+
+def normalize_audio(audio):
+    """Peak-normalize signed 16-bit PCM to -1 dBFS, like SoX gain -n -1."""
+    if len(audio) % SAMPLE_WIDTH:
+        raise ValueError("Audio must contain complete 16-bit samples.")
+    samples = array("h")
+    samples.frombytes(audio)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    peak = max((abs(sample) for sample in samples), default=0)
+    if not peak:
+        return audio
+    gain = TARGET_PEAK / peak
+    normalized = array("h", (round(sample * gain) for sample in samples))
+    if sys.byteorder != "little":
+        normalized.byteswap()
+    return normalized.tobytes()
 
 
 async def _transcribe(audio, uri):
@@ -39,7 +62,7 @@ def transcribe(audio):
     uri = os.getenv("WHISPER_URI", "tcp://127.0.0.1:10300")
 
     async def request():
-        return await asyncio.wait_for(_transcribe(audio, uri), timeout=120)
+        return await asyncio.wait_for(_transcribe(normalize_audio(audio), uri), timeout=120)
 
     try:
         return asyncio.run(request())
