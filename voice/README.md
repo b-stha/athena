@@ -83,6 +83,11 @@ For typed command debugging:
 Text mode skips the voice frontend and its model. `--manual` and Space-controlled
 recording are removed.
 
+The skills process loads only Athena's skill through OVOS's native loader. Its
+Adapt intents register during loading, so startup completes without waiting for
+an intent-training acknowledgement or checking internet connectivity. Backend
+connections are checked when you issue a command.
+
 ## Wake sensitivity
 
 If background sounds cause false wake detections, stop the frontend and try:
