@@ -228,6 +228,12 @@ class WhisperSTTTests(unittest.TestCase):
             configured = plugins.AthenaWhisperSTT({"uri": "tcp://other:10301", "lang": "en-US"})
             self.assertEqual(configured.uri, "tcp://other:10301")
 
+    def test_nonpositive_or_nonfinite_timeouts_are_rejected(self):
+        for setting in ("timeout", "connect_timeout"):
+            for value in (0, -1, float("inf"), float("nan"), True):
+                with self.subTest(setting=setting, value=value), self.assertRaisesRegex(ValueError, "finite and positive"):
+                    plugins.AthenaWhisperSTT({"lang": "en-US", setting: value})
+
     def test_internet_is_not_required_by_local_stt(self):
         self.assertFalse(self.engine.runtime_requirements.requires_internet)
         self.assertFalse(self.engine.runtime_requirements.internet_before_load)

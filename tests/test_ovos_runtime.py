@@ -57,13 +57,16 @@ class RuntimeConfigurationTests(unittest.TestCase):
             root = Path(directory)
             model = root / "test.onnx"
             model.write_bytes(b"configuration-only fixture")
-            env, _ = prepare_environment(root, model, wake_sensitivity=0.2, wake_trigger_level=5)
+            env, _ = prepare_environment(root, model, wake_sensitivity=0.2,
+                                         wake_trigger_level=5, stt_timeout=4.5)
             path = Path(env["XDG_CONFIG_HOME"]) / "athena" / "mycroft.conf"
             configured = json.loads(path.read_text())["hotwords"]["athena"]
             self.assertEqual((configured["sensitivity"], configured["trigger_level"]), (0.2, 5))
+            self.assertEqual(json.loads(path.read_text())["stt"]["athena-wyoming-whisper"]["timeout"], 4.5)
             prepare_environment(root, model)
             defaults = json.loads(path.read_text())["hotwords"]["athena"]
             self.assertEqual((defaults["sensitivity"], defaults["trigger_level"]), (0.5, 3))
+            self.assertEqual(json.loads(path.read_text())["stt"]["athena-wyoming-whisper"]["timeout"], 30)
 
     def test_invalid_wake_settings_fail_before_writing_configuration(self):
         invalid = [{"wake_sensitivity": value} for value in
@@ -76,6 +79,16 @@ class RuntimeConfigurationTests(unittest.TestCase):
             for settings in invalid:
                 with self.subTest(settings=settings), self.assertRaisesRegex(ValueError, "Wake"):
                     prepare_environment(root, model, **settings)
+            self.assertFalse((root / ".ovos" / "config").exists())
+
+    def test_invalid_transcription_deadlines_fail_before_writing_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "test.onnx"
+            model.write_bytes(b"configuration-only fixture")
+            for timeout in (0, -1, float("inf"), float("nan"), True, "30", None):
+                with self.subTest(timeout=timeout), self.assertRaisesRegex(ValueError, "Transcription timeout"):
+                    prepare_environment(root, model, stt_timeout=timeout)
             self.assertFalse((root / ".ovos" / "config").exists())
 
     def test_real_merged_config_disables_default_wake_words_and_uses_valid_audio_plugins(self):
@@ -101,6 +114,7 @@ result = {
     "frame_ms": microphone.frames_per_chunk * 1000 / microphone.sample_rate,
     "silence": bool(vad.is_silence(bytes(microphone.chunk_size))),
     "stt": type(stt).__name__,
+    "stt_timeout": stt.timeout,
     "wake_word": OVOSWakeWordFactory.get_class("athena").__name__,
     "wake_settings": [config["hotwords"]["athena"]["sensitivity"],
                       config["hotwords"]["athena"]["trigger_level"]],
@@ -112,7 +126,8 @@ print("ATHENA_TEST_RESULT=" + json.dumps(result))
             root = Path(directory)
             model = root / "test.onnx"
             model.write_bytes(b"configuration-only fixture")
-            env, _ = prepare_environment(root, model, wake_sensitivity=0.2, wake_trigger_level=5)
+            env, _ = prepare_environment(root, model, wake_sensitivity=0.2,
+                                         wake_trigger_level=5, stt_timeout=12.5)
             # Also isolate legacy ~/.mycroft and distribution configuration
             # sources so this test cannot depend on another assistant setup.
             env["HOME"] = str(root)
@@ -129,6 +144,7 @@ print("ATHENA_TEST_RESULT=" + json.dumps(result))
             self.assertEqual(actual["frame_ms"], 20)
             self.assertTrue(actual["silence"])
             self.assertEqual(actual["stt"], "AthenaWhisperSTT")
+            self.assertEqual(actual["stt_timeout"], 12.5)
             self.assertEqual(actual["wake_word"], "AthenaPreciseWakeWord")
             self.assertEqual(actual["wake_settings"], [0.2, 5])
             self.assertTrue(all(stage.startswith(("adapt_", "fallback_")) for stage in actual["pipeline"]))
