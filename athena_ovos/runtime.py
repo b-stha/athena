@@ -172,7 +172,7 @@ def run(root, env, config, *, startup_timeout=60):
                if message.data.get("utterances") else None)
         bus.run_in_thread()
         wait_until(bus.connected_event.is_set, "messagebus connection")
-        start("skills", "ovos_core", "--disable-installer")
+        start("skills", "athena_ovos.skills")
         wait_until(skill_ready.is_set, "Athena skill")
         with tempfile.TemporaryDirectory(prefix="athena-ready-") as ready_dir:
             ready_path = Path(ready_dir) / "listener"
