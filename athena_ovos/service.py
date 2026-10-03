@@ -6,7 +6,7 @@ import sys
 
 
 def main():
-    from ovos_dinkum_listener.service import OVOSDinkumVoiceService
+    from athena_ovos.listener import AthenaVoiceService
     from ovos_plugin_manager.stt import OVOSSTTFactory
     from ovos_utils.log import init_service_logger
     from athena_ovos.streaming import BufferedWhisperSTT
@@ -24,8 +24,10 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     init_service_logger("voice")
-    service = OVOSDinkumVoiceService(on_ready=ready, on_error=error,
-                                   stt=BufferedWhisperSTT(OVOSSTTFactory.create()))
+    service = AthenaVoiceService(
+        on_ready=ready, on_error=error, disable_fallback=True,
+        stt=BufferedWhisperSTT(OVOSSTTFactory.create()),
+    )
     try:
         service.run()
     finally:

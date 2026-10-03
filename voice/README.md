@@ -129,6 +129,18 @@ following command using WebRTC VAD. Its initial settings are:
 | Maximum recording duration | 30 seconds |
 | Audio retained around wake detection | 200 ms |
 
+Athena's listener tracks whether OVOS confirms command speech by entering its
+recording state after the minimum speech duration. If that never happens before
+the five-second speech wait expires, Athena discards the buffered recording
+without contacting Whisper and returns to wake detection. Recording-end cleanup
+and the usual retry feedback still run. Rejected audio is cleared before the
+next recording starts.
+
+This uses the existing WebRTC speech decision; it adds no volume threshold.
+Noise that WebRTC classifies as sustained speech can still reach transcription,
+and quiet real speech that it misses will be discarded. Validate both keyboard
+noise and normal speech from the intended distance before tuning sensitivity.
+
 The microphone plugin supplies audio throughout the listener's lifecycle. Its
 bounded queue retains recent audio while OVOS is busy transcribing. OVOS owns
 the command buffer and decides when to start and finish recording; Athena does
