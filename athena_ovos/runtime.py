@@ -17,7 +17,7 @@ from athena_ovos.setup import resolve_model_path
 
 
 def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
-                 wake_sensitivity=0.5, wake_trigger_level=3):
+                 wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30):
     if not 1 <= bus_port <= 65535:
         raise ValueError("Bus port must be between 1 and 65535.")
     if (isinstance(wake_sensitivity, bool) or not isinstance(wake_sensitivity, (int, float))
@@ -26,6 +26,9 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
     if (isinstance(wake_trigger_level, bool) or not isinstance(wake_trigger_level, int)
             or wake_trigger_level < 0):
         raise ValueError("Wake trigger level must be a nonnegative integer.")
+    if (isinstance(stt_timeout, bool) or not isinstance(stt_timeout, (int, float))
+            or not math.isfinite(stt_timeout) or stt_timeout <= 0):
+        raise ValueError("Transcription timeout must be a finite positive number of seconds.")
     return {
         "lang": "en-us", "secondary_langs": [], "confirm_listening": False,
         "sounds": {key: "" for key in ("start_listening", "end_listening", "acknowledge", "error")},
@@ -63,18 +66,19 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
                 "hey_mycroft_pocketsphinx", "wake_up", "wake_up_pocketsphinx")},
         },
         "stt": {"module": "athena-wyoming-whisper", "fallback_module": "",
-                "athena-wyoming-whisper": {"timeout": 120, "connect_timeout": 5}},
+                "athena-wyoming-whisper": {"timeout": stt_timeout, "connect_timeout": 5}},
     }
 
 
 def prepare_environment(root, model=None, *, device="reSpeaker Flex XVF3800", bus_port=8181,
-                        wake_sensitivity=0.5, wake_trigger_level=3):
+                        wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30):
     root = Path(root).resolve()
     model = Path(model).expanduser().resolve() if model else resolve_model_path(root)
     if not model.is_file() or not model.stat().st_size:
         raise ValueError("Athena wake model is missing. Run .venv/bin/python -m athena_ovos.setup.")
     config = build_config(model, device=device, bus_port=bus_port,
-                          wake_sensitivity=wake_sensitivity, wake_trigger_level=wake_trigger_level)
+                          wake_sensitivity=wake_sensitivity, wake_trigger_level=wake_trigger_level,
+                          stt_timeout=stt_timeout)
     state = root / ".ovos"
     config_dir = state / "config" / "athena"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -161,6 +165,8 @@ def run(root, env, config, *, startup_timeout=60):
         bus.on("mycroft.skill.loaded", lambda message: skill_ready.set()
                if message.data.get("skill_id") == "athena-skill" else None)
         bus.on("speak", lambda message: print(message.data.get("utterance", ""), flush=True))
+        bus.on("recognizer_loop:speech.recognition.unknown", lambda message:
+               print("Could not transcribe the command. Say 'Athena' to try again.", flush=True))
         bus.on("recognizer_loop:utterance", lambda message:
                print("Heard: " + str(message.data.get("utterances", [""])[0]), flush=True)
                if message.data.get("utterances") else None)

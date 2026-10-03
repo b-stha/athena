@@ -5,6 +5,7 @@ only supply mono microphone chunks and transcribe the recording OVOS provides.
 """
 
 import asyncio
+import math
 import os
 import sys
 from array import array
@@ -174,10 +175,13 @@ class AthenaWhisperSTT(STT):
     def __init__(self, config=None):
         super().__init__(config)
         self.uri = self.config.get("uri") or os.getenv("WHISPER_URI", "tcp://127.0.0.1:10300")
-        self.timeout = float(self.config.get("timeout", 120))
+        self.timeout = float(self.config.get("timeout", 30))
         self.connect_timeout = float(self.config.get("connect_timeout", 5))
-        if self.timeout <= 0 or self.connect_timeout <= 0:
-            raise ValueError("Whisper timeouts must be positive.")
+        if (isinstance(self.config.get("timeout"), bool)
+                or isinstance(self.config.get("connect_timeout"), bool)
+                or not all(math.isfinite(value) and value > 0
+                           for value in (self.timeout, self.connect_timeout))):
+            raise ValueError("Whisper timeouts must be finite and positive.")
 
     @classproperty
     def runtime_requirements(cls):
@@ -208,6 +212,6 @@ class AthenaWhisperSTT(STT):
         try:
             return asyncio.run(request())
         except TimeoutError as error:
-            raise RuntimeError("Whisper transcription timed out.") from error
+            raise RuntimeError(f"Whisper transcription timed out after {self.timeout:g} seconds.") from error
         except OSError as error:
             raise RuntimeError("Cannot reach Whisper. Check the service and WHISPER_URI.") from error

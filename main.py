@@ -44,6 +44,8 @@ def main():
                         help="wake sensitivity from 0 to 1; lower is stricter (default: 0.5)")
     parser.add_argument("--wake-trigger-level", type=int, default=3,
                         help="wake activation count; higher requires more evidence (default: 3)")
+    parser.add_argument("--stt-timeout", type=float, default=30,
+                        help="seconds to wait for transcription after recording (default: 30)")
     parser.add_argument("--check-config", action="store_true", help="validate plugins and model without recording")
     args = parser.parse_args()
 
@@ -57,11 +59,13 @@ def main():
         env, config = prepare_environment(
             root, args.model, device=args.mic_device, bus_port=args.bus_port,
             wake_sensitivity=args.wake_sensitivity, wake_trigger_level=args.wake_trigger_level,
+            stt_timeout=args.stt_timeout,
         )
         os.environ.update(env)
         check_plugins()
         print(f"Wake settings: sensitivity {args.wake_sensitivity:g}, "
               f"trigger level {args.wake_trigger_level}.", flush=True)
+        print(f"Transcription timeout: {args.stt_timeout:g} seconds.", flush=True)
         if args.check_config:
             from ovos_plugin_manager.microphone import OVOSMicrophoneFactory
             from ovos_plugin_manager.stt import OVOSSTTFactory
