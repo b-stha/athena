@@ -137,8 +137,24 @@ not run a second microphone recorder.
 `athena_ovos.plugins.AthenaWhisperSTT` receives the completed OVOS recording,
 converts it to 16 kHz, signed 16-bit mono and peak-normalizes it to -1 dBFS before
 sending Wyoming transcription events. It requests English, connects within
-five seconds and limits each transcription request to 120 seconds. Disconnects,
-server errors and timeouts are reported as failures.
+five seconds and limits each transcription request to 30 seconds by default.
+Disconnects, server errors and timeouts are reported as failures.
+
+OVOS pauses wake detection while waiting for transcription. When transcription
+fails or returns no text, the terminal reports that you can try again and OVOS
+returns to wake detection. The deadline starts after recording, so the time
+spent speaking and waiting for end-of-speech is separate.
+
+Override the transcription deadline with a finite positive number of seconds:
+
+```bash
+./run.sh --stt-timeout 30
+```
+
+A timeout closes Athena's connection; it does not cancel inference already
+running inside the Whisper server. A slow server may still be busy when the next
+request arrives. The shorter deadline bounds Athena's wait, while server
+performance and recognition quality need a separate check.
 
 Stopping Athena discards an unfinished recording and joins the framework's
 buffer worker, without requesting transcription of that partial command.
