@@ -17,7 +17,7 @@ from athena_ovos.setup import resolve_model_path
 
 
 def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
-                 wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30):
+                 wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30, wake_diagnostics=False):
     if not 1 <= bus_port <= 65535:
         raise ValueError("Bus port must be between 1 and 65535.")
     if (isinstance(wake_sensitivity, bool) or not isinstance(wake_sensitivity, (int, float))
@@ -29,6 +29,8 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
     if (isinstance(stt_timeout, bool) or not isinstance(stt_timeout, (int, float))
             or not math.isfinite(stt_timeout) or stt_timeout <= 0):
         raise ValueError("Transcription timeout must be a finite positive number of seconds.")
+    if not isinstance(wake_diagnostics, bool):
+        raise ValueError("Wake diagnostics must be a boolean.")
     return {
         "lang": "en-us", "secondary_langs": [], "confirm_listening": False,
         "sounds": {key: "" for key in ("start_listening", "end_listening", "acknowledge", "error")},
@@ -60,7 +62,8 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
         "hotwords": {
             "athena": {"module": "athena-precise-onnx", "model": str(model),
                        "active": True, "listen": True, "wakeup": True,
-                       "sensitivity": wake_sensitivity, "trigger_level": wake_trigger_level},
+                       "sensitivity": wake_sensitivity, "trigger_level": wake_trigger_level,
+                       "diagnostics": wake_diagnostics},
             **{word: {"active": False} for word in (
                 "hey_mycroft", "hey_mycroft_precise", "hey_mycroft_vosk",
                 "hey_mycroft_pocketsphinx", "wake_up", "wake_up_pocketsphinx")},
@@ -71,14 +74,14 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
 
 
 def prepare_environment(root, model=None, *, device="reSpeaker Flex XVF3800", bus_port=8181,
-                        wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30):
+                        wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30, wake_diagnostics=False):
     root = Path(root).resolve()
     model = Path(model).expanduser().resolve() if model else resolve_model_path(root)
     if not model.is_file() or not model.stat().st_size:
         raise ValueError("Athena wake model is missing. Run .venv/bin/python -m athena_ovos.setup.")
     config = build_config(model, device=device, bus_port=bus_port,
                           wake_sensitivity=wake_sensitivity, wake_trigger_level=wake_trigger_level,
-                          stt_timeout=stt_timeout)
+                          stt_timeout=stt_timeout, wake_diagnostics=wake_diagnostics)
     state = root / ".ovos"
     config_dir = state / "config" / "athena"
     config_dir.mkdir(parents=True, exist_ok=True)

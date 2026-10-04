@@ -110,6 +110,35 @@ prints the effective settings and rejects invalid ranges before starting OVOS.
 Use the flags on each launch. `.ovos/config/athena/mycroft.conf` is generated
 again at startup, so manual edits there do not persist through `./run.sh`.
 
+### Diagnosing false or missed wake words
+
+Enable score and input-level reports for a controlled test:
+
+```bash
+./run.sh --wake-sensitivity 0.2 --wake-trigger-level 5 --wake-diagnostics
+```
+
+After the 1.5-second warmup, `Wake diagnostic:` reports appear once per second
+of audio processed while detecting the wake word, and immediately on a trigger.
+They report the current decoded model score, the maximum since the previous
+report, the threshold, qualifying frame counts and activation counts. A trigger
+shows the count that caused activation rather than the detector's cooldown.
+These scores are detector outputs, not a calibrated percentage certainty that
+someone said Athena. Reports pause during command recording and transcription.
+
+`rms_dbfs` and `peak_dbfs` describe the current rolling 1.5-second input window;
+`window_ms` gives its length. Zero dBFS is full scale, more negative values are
+quieter, and `-inf` means digital silence. The level window corresponds to the
+current score; an earlier maximum score can have different levels. Diagnostics
+retain only bounded numeric summaries and write no audio recordings.
+
+Compare deliberate Athena detections at the desk and intended distance with
+keyboard typing and phone/video speech that never says Athena. Keep the same
+settings between examples. If unrelated audio scores as highly as your real
+wake word, threshold tuning alone cannot separate those examples; evaluate a
+better-trained Athena model. Diagnostics are disabled on launches that omit the
+flag; launcher options regenerate the configuration each time.
+
 ## Microphone and recording
 
 `athena_ovos.plugins.AthenaMicrophone` opens the reSpeaker Flex XVF3800 as
