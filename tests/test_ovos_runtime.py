@@ -11,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from athena_ovos.runtime import _check_processes, prepare_environment, stop_processes
+from athena_ovos.runtime import _check_processes, build_config, prepare_environment, stop_processes
 
 
 class RuntimeConfigurationTests(unittest.TestCase):
@@ -51,6 +51,36 @@ class RuntimeConfigurationTests(unittest.TestCase):
                 with self.subTest(port=port), self.assertRaisesRegex(ValueError, "Bus port"):
                     prepare_environment(root, model, bus_port=port)
             self.assertFalse((root / ".ovos" / "config").exists())
+
+    def test_wake_diagnostics_are_disabled_by_default(self):
+        config = build_config(Path("athena.onnx"))
+        self.assertIs(config["hotwords"]["athena"]["diagnostics"], False)
+
+    def test_wake_diagnostics_opt_in_is_saved_and_regeneration_resets_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "test.onnx"
+            model.write_bytes(b"configuration-only fixture")
+            env, config = prepare_environment(root, model, wake_diagnostics=True)
+            path = Path(env["XDG_CONFIG_HOME"]) / "athena" / "mycroft.conf"
+            self.assertIs(config["hotwords"]["athena"]["diagnostics"], True)
+            self.assertIs(json.loads(path.read_text())["hotwords"]["athena"]["diagnostics"], True)
+            _, defaults = prepare_environment(root, model)
+            self.assertIs(defaults["hotwords"]["athena"]["diagnostics"], False)
+            self.assertIs(json.loads(path.read_text())["hotwords"]["athena"]["diagnostics"], False)
+
+    def test_invalid_wake_diagnostics_fail_before_writing_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "test.onnx"
+            model.write_bytes(b"configuration-only fixture")
+            for diagnostics in (1, 0, "true", None, [], {}):
+                with self.subTest(diagnostics=diagnostics):
+                    with self.assertRaises(ValueError):
+                        build_config(model, wake_diagnostics=diagnostics)
+                    with self.assertRaises(ValueError):
+                        prepare_environment(root, model, wake_diagnostics=diagnostics)
+                    self.assertFalse((root / ".ovos" / "config").exists())
 
     def test_wake_settings_survive_configuration_regeneration(self):
         with tempfile.TemporaryDirectory() as directory:
