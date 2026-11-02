@@ -2,16 +2,17 @@
 
 Athena is a Raspberry Pi 5 voice assistant. Its trained openWakeWord model detects
 Athena or Hey Athena; OVOS handles reSpeaker capture, VAD and recording, with local
-Whisper/Wyoming transcription. Every completed transcript currently goes to a
-Pi-hosted agent that uses a configurable
-cloud model and two independent MCP backends.
+Whisper/Wyoming transcription. Completed transcripts reach a Pi-hosted dispatcher.
+An opt-in route handles registered HA light commands locally; other requests use
+a configurable cloud model and two independent MCP backends.
 
 ```text
-reSpeaker -> custom wake + OVOS recording -> local Whisper -> Athena agent on Pi
+reSpeaker -> custom wake + OVOS recording -> local Whisper -> Athena dispatcher on Pi
                                                          |
                                  cloud model API <-------+-- MCP -> Home Assistant
                                                          +-- MCP -> Windows-MCP on PC
                                                          +-- native Wake-on-LAN
+                              opt-in single HA action ---+-- direct HA REST
 ```
 
 The Pi owns conversation state, tool selection/dispatch and result handling.
@@ -22,15 +23,15 @@ integration. Both servers are reached through authenticated Streamable HTTP.
 ## Current state and architectural findings
 
 Status recorded **2026-11-01**, on `codex/agent-mcp-rebuild` in both Athena and
-Athena Desktop. The MCP architecture is implemented and deployed. The hybrid
-local/contextual routing described below is the next design, not the current
-runtime. Existing voice training/testing work has been committed and integrated.
+Athena Desktop. The MCP architecture and opt-in single-HA local route are
+implemented. General mixed local/contextual execution remains planned.
+Existing voice training/testing work has been committed and integrated.
 
 | Area | Current behavior | Remaining work |
 | --- | --- | --- |
-| Understanding | Voice and typed requests use the same contextual cloud agent. | Route routine actions locally and reserve model calls for context. |
+| Understanding | Voice/text share a dispatcher: opt-in single HA commands locally, other requests through the cloud agent. | Add scope-aware mixed execution and broader routine coverage. |
 | Device access | HA MCP, Windows-MCP and Pi-native Wake-on-LAN are connected. | Share typed actions between rules, local parsing and model-selected plans. |
-| Cost | Every normal request can invoke the model repeatedly, resending the full tool catalog. | Record actual usage, select relevant tools and remove unnecessary model rounds. |
+| Cost | Direct local commands use no model requests; cloud turns can invoke the model repeatedly with the full catalog. | Record actual usage, select relevant tools and remove unnecessary model rounds. |
 | Voice | Custom Athena/Hey Athena openWakeWord, OVOS capture/VAD and local Whisper. Spoken clock queries succeeded. | Improve quiet/distant recognition, false activations, transcription and command handoff. |
 | Desktop | Athena Desktop supervises pinned Windows-MCP; shared physical/AI input is configured. | Prefer background APIs where possible; foreground input still shares cursor/focus. |
 
@@ -40,9 +41,11 @@ inference. Gemini 3.8 Flash returned overload/timeouts during commissioning.
 The tested project also reached a 20-request/day free-tier quota for 3.6 Flash;
 one user command can consume multiple model requests.
 
-The legacy closed command grammar and direct HA REST helper remain in the source,
-but only `--legacy-text` selects that path today. Merely retaining that code does
-not make normal voice/text requests hybrid or usable without the cloud model.
+The closed command grammar also feeds an opt-in local dispatcher. With
+`ATHENA_LOCAL_HA_ENABLED=true`, one complete registered HA light on/off command
+uses direct REST and a local acknowledgment, without cloud credentials or MCP.
+The default flag is false; other requests use the cloud agent. `--legacy-text`
+still selects the older diagnostic route, including its legacy Desktop transport.
 
 ## Active development priorities
 
@@ -65,13 +68,14 @@ and acknowledge locally even when cloud credentials/quota are unavailable.
 Contextual fallback should receive only relevant tools and verified action
 history. The acceptance criteria and implementation sequence are in the
 [development plan](docs/DEVELOPMENT_PLAN.md). These are planned changes; normal
-runtime requests still use the existing cloud agent until that work is delivered.
+Mixed and contextual runtime requests still use the existing cloud agent.
 
 The first [command-planning preview](docs/COMMAND_PLANNING.md) is implemented:
 `python -m athena_agent.planning 'turn on bedroom lights and open my most recent project'`.
 It exposes typed local candidates and unresolved contextual clauses with source
-spans and ordering dependencies. It performs no execution or cloud calls; hybrid
-runtime dispatch and the outcome ledger remain the next integration slice.
+spans and ordering dependencies. The preview itself executes nothing. The first
+opt-in runtime integration handles single HA actions and records outcomes;
+scope-aware mixed execution remains outstanding. See the linked testing steps.
 
 ## Planned local and contextual boundary
 

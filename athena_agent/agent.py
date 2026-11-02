@@ -34,6 +34,18 @@ class Agent:
     async def close(self):
         await self.model.close()
 
+    def remember_local_turn(self, text, result, *, session_id='default'):
+        """Retain a completed local request without a model or tool call."""
+        session_id = str(session_id)[:128]
+        turns = self.history.pop(session_id, [])
+        self.history[session_id] = turns
+        while len(self.history) > 8:
+            self.history.popitem(last=False)
+        turns.append([{'role': 'user', 'content': text}, {'role': 'assistant', 'content': result}])
+        while turns and (len(turns) > self.config.history_turns
+                         or len(json.dumps(turns, ensure_ascii=False)) > self.config.history_chars):
+            turns.pop(0)
+
     async def turn(self, text, session_id="default"):
         if not isinstance(text, str) or not text.strip() or len(text) > 8000:
             raise ValueError("A command must contain between 1 and 8000 characters.")

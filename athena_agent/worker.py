@@ -4,13 +4,12 @@ import asyncio
 from queue import Empty, Full, Queue
 import threading
 
-from .agent import Agent
-from .config import AgentConfig
+from .dispatcher import RequestDispatcher
 
 
 class AgentWorker:
     def __init__(self, *, factory=None):
-        self.factory = factory or (lambda: Agent(AgentConfig.from_env()))
+        self.factory = factory or RequestDispatcher
         self.queue = Queue(maxsize=2)
         self.lock = threading.Lock()
         self.thread = None

@@ -34,11 +34,10 @@ def legacy_text_mode():
 
 def text_mode():
     import asyncio
-    from athena_agent.agent import Agent
-    from athena_agent.config import AgentConfig
+    from athena_agent.dispatcher import RequestDispatcher
 
     async def chat():
-        agent = Agent(AgentConfig.from_env())
+        agent = RequestDispatcher()
         print("Athena agent - type a command, or exit to quit.")
         try:
             while True:
@@ -64,6 +63,7 @@ def main():
     modes.add_argument("--text", action="store_true", help="type requests for the same agent used by voice")
     modes.add_argument("--legacy-text", action="store_true", help="diagnose the retired deterministic REST backends")
     modes.add_argument("--check-agent-config", action="store_true", help="validate model/MCP settings without connecting")
+    modes.add_argument("--check-local-config", action="store_true", help="validate direct HA settings without connecting")
     parser.add_argument("--wake-engine", choices=("custom", "precise"),
                         default=os.getenv("ATHENA_WAKE_ENGINE", "custom"),
                         help="wake detector (default: custom trained openWakeWord model)")
@@ -99,6 +99,11 @@ def main():
     try:
         if args.legacy_text:
             return legacy_text_mode()
+        if args.check_local_config:
+            from athena_agent.local_ha import LocalHAConfig
+            LocalHAConfig.from_env()
+            print("Direct Home Assistant configuration is valid. No network request or device action was made.")
+            return 0
         if args.check_agent_config:
             from athena_agent.config import AgentConfig
             config = AgentConfig.from_env()
