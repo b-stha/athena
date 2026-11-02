@@ -52,15 +52,31 @@ class PreciseWakeTests(unittest.TestCase):
         decoder = self.engine.threshold_decoder
         original = decoder._decoder
         original.decode.return_value = 0.73
-        raw = np.float32(0.4)
-        self.assertEqual(decoder.decode(raw), 0.73)
-        original.decode.assert_called_once_with(raw)
-        self.assertIs(original.decode.call_args.args[0], raw)
+        for raw in (np.float32(0.4), np.float32(np.finfo(np.float32).eps / 2),
+                    np.nextafter(np.float32(1), np.float32(0))):
+            with self.subTest(raw=raw):
+                original.decode.reset_mock()
+                self.assertEqual(decoder.decode(raw), 0.73)
+                original.decode.assert_called_once_with(raw)
+                self.assertIs(original.decode.call_args.args[0], raw)
         self.assertIs(decoder.encode, original.encode)
+
+    def test_float32_sigmoid_roundoff_maps_only_within_one_endpoint_epsilon(self):
+        decoder = self.engine.threshold_decoder
+        epsilon = float(np.finfo(np.float32).eps)
+        for raw, expected in ((np.float32(-epsilon / 2), 0.0),
+                              (np.float32(-epsilon), 0.0),
+                              (np.float32(1 + epsilon), 1.0)):
+            with self.subTest(raw=raw):
+                self.assertEqual(decoder.decode(raw), expected)
+        decoder._decoder.decode.assert_not_called()
 
     def test_invalid_raw_probabilities_fail_without_entering_the_decoder(self):
         decoder = self.engine.threshold_decoder
-        for value in (-0.01, 1.01, float("nan"), float("inf"), -float("inf"), True, np.bool_(False)):
+        epsilon = float(np.finfo(np.float32).eps)
+        for value in (-0.01, 1.01, float("nan"), float("inf"), -float("inf"), True, np.bool_(False),
+                      np.float32(-epsilon * 2), np.float32(1 + epsilon * 2),
+                      -epsilon / 2, np.float64(-epsilon / 2)):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "invalid probability"):
                 decoder.decode(value)
         decoder._decoder.decode.assert_not_called()

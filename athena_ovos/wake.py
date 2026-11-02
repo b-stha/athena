@@ -13,16 +13,24 @@ class _BoundarySafeDecoder:
     """Handle the closed probability interval without modifying the plugin.
 
     Some Precise plugin builds apply logit to exact ONNX outputs of zero or
-    one. Their calibrated limits are the same endpoints; interior predictions
-    retain the original decoder and calibration unchanged.
+    one. ONNX Runtime 1.20.1 can also return float32 sigmoid roundoff just below
+    zero. Only float32 values within one machine epsilon of an endpoint are
+    corrected; interior predictions retain the original calibration unchanged.
     """
 
     def __init__(self, decoder):
         self._decoder = decoder
 
     def decode(self, raw_output):
-        if (isinstance(raw_output, (bool, np.bool_)) or not math.isfinite(raw_output)
-                or not 0 <= raw_output <= 1):
+        if isinstance(raw_output, (bool, np.bool_)) or not math.isfinite(raw_output):
+            raise ValueError("Precise model returned an invalid probability.")
+        if isinstance(raw_output, np.float32):
+            epsilon = float(np.finfo(np.float32).eps)
+            if -epsilon <= raw_output < 0:
+                return 0.0
+            if 1 < raw_output <= 1 + epsilon:
+                return 1.0
+        if not 0 <= raw_output <= 1:
             raise ValueError("Precise model returned an invalid probability.")
         if raw_output == 0 or raw_output == 1:
             return float(raw_output)
