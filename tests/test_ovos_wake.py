@@ -35,6 +35,36 @@ class PreciseWakeTests(unittest.TestCase):
     def create_detector(self, **settings):
         return wake.AthenaPreciseWakeWord("athena", {"model": str(self.model), **settings})
 
+    def test_exact_raw_probability_endpoints_bypass_logit_on_this_engine_only(self):
+        decoder = self.engine.threshold_decoder
+        self.assertIsInstance(decoder, wake._BoundarySafeDecoder)
+        original = decoder._decoder
+        original.decode.side_effect = lambda value: -math.log(1 / value - 1)
+        for value in (0.0, 1.0, np.float32(0), np.float32(1)):
+            with self.subTest(value=value):
+                self.assertEqual(decoder.decode(value), float(value))
+        original.decode.assert_not_called()
+        # The upstream instance is still untouched rather than monkey-patched.
+        with self.assertRaises(ZeroDivisionError):
+            original.decode(0.0)
+
+    def test_interior_probability_uses_the_original_calibration_unchanged(self):
+        decoder = self.engine.threshold_decoder
+        original = decoder._decoder
+        original.decode.return_value = 0.73
+        raw = np.float32(0.4)
+        self.assertEqual(decoder.decode(raw), 0.73)
+        original.decode.assert_called_once_with(raw)
+        self.assertIs(original.decode.call_args.args[0], raw)
+        self.assertIs(decoder.encode, original.encode)
+
+    def test_invalid_raw_probabilities_fail_without_entering_the_decoder(self):
+        decoder = self.engine.threshold_decoder
+        for value in (-0.01, 1.01, float("nan"), float("inf"), -float("inf"), True, np.bool_(False)):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "invalid probability"):
+                decoder.decode(value)
+        decoder._decoder.decode.assert_not_called()
+
     def warmup(self):
         self.detector.update(self.hop * 30)
 

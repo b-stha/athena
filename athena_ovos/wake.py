@@ -9,6 +9,29 @@ from ovos_ww_plugin_precise_onnx import PreciseOnnxHotwordPlugin
 from ovos_ww_plugin_precise_onnx.inference import TriggerDetector
 
 
+class _BoundarySafeDecoder:
+    """Handle the closed probability interval without modifying the plugin.
+
+    Some Precise plugin builds apply logit to exact ONNX outputs of zero or
+    one. Their calibrated limits are the same endpoints; interior predictions
+    retain the original decoder and calibration unchanged.
+    """
+
+    def __init__(self, decoder):
+        self._decoder = decoder
+
+    def decode(self, raw_output):
+        if (isinstance(raw_output, (bool, np.bool_)) or not math.isfinite(raw_output)
+                or not 0 <= raw_output <= 1):
+            raise ValueError("Precise model returned an invalid probability.")
+        if raw_output == 0 or raw_output == 1:
+            return float(raw_output)
+        return self._decoder.decode(raw_output)
+
+    def __getattr__(self, name):
+        return getattr(self._decoder, name)
+
+
 class AthenaPreciseWakeWord(PreciseOnnxHotwordPlugin):
     """Preserve Precise's hop cadence and suppress empty feature-window triggers.
 
@@ -37,6 +60,7 @@ class AthenaPreciseWakeWord(PreciseOnnxHotwordPlugin):
             raise ValueError("Configure Athena's Precise ONNX model before listening.")
         configuration.update(sensitivity=sensitivity, trigger_level=trigger_level)
         super().__init__(key_phrase, configuration)
+        self.engine.threshold_decoder = _BoundarySafeDecoder(self.engine.threshold_decoder)
 
         self.diagnostics = diagnostics
         self._pending = bytearray()
