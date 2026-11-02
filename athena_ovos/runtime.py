@@ -19,7 +19,8 @@ from athena_ovos.setup import resolve_model_path
 def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
                  wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30, wake_diagnostics=False,
                  wake_engine="precise", melspec_model=None, embedding_model=None,
-                 wake_threshold=0.98, wake_consecutive=1, wake_cooldown=2.0):
+                 wake_threshold=0.98, wake_consecutive=1, wake_cooldown=2.0,
+                 silence_end=2.0, command_wait=5.0):
     if not 1 <= bus_port <= 65535:
         raise ValueError("Bus port must be between 1 and 65535.")
     if (isinstance(wake_sensitivity, bool) or not isinstance(wake_sensitivity, (int, float))
@@ -33,6 +34,10 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
         raise ValueError("Transcription timeout must be a finite positive number of seconds.")
     if not isinstance(wake_diagnostics, bool):
         raise ValueError("Wake diagnostics must be a boolean.")
+    for label, value in (("silence_end", silence_end), ("command_wait", command_wait)):
+        if (isinstance(value, bool) or not isinstance(value, (int, float))
+                or not math.isfinite(value) or value <= 0 or value > 30):
+            raise ValueError(f"{label} must be finite and between 0 and 30 seconds, excluding zero.")
     if wake_engine not in {"custom", "precise"}:
         raise ValueError("Wake engine must be custom or precise.")
     hotword = {"model": str(model), "active": True, "listen": True,
@@ -59,8 +64,8 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
         "listener": {
             "sample_rate": 16000, "wake_word": "athena", "stand_up_word": "athena",
             "instant_listen": True, "continuous_listen": False, "hybrid_listen": False,
-            "retry_mic_init": False, "speech_begin": 0.1, "silence_end": 0.8,
-            "recording_timeout": 30, "recording_timeout_with_silence": 5,
+            "retry_mic_init": False, "speech_begin": 0.1, "silence_end": silence_end,
+            "recording_timeout": 30, "recording_timeout_with_silence": command_wait,
             "utterance_chunks_to_rewind": 10, "remove_silence": True,
             "record_wake_words": False, "save_utterances": False,
             "microphone": {
@@ -90,7 +95,8 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
 def prepare_environment(root, model=None, *, device="reSpeaker Flex XVF3800", bus_port=8181,
                         wake_sensitivity=0.5, wake_trigger_level=3, stt_timeout=30, wake_diagnostics=False,
                         wake_engine="precise", melspec_model=None, embedding_model=None,
-                        wake_threshold=0.98, wake_consecutive=1, wake_cooldown=2.0):
+                        wake_threshold=0.98, wake_consecutive=1, wake_cooldown=2.0,
+                        silence_end=2.0, command_wait=5.0):
     root = Path(root).resolve()
     if wake_engine == "custom":
         from athena_wake.detector import model_file
@@ -113,7 +119,8 @@ def prepare_environment(root, model=None, *, device="reSpeaker Flex XVF3800", bu
                           stt_timeout=stt_timeout, wake_diagnostics=wake_diagnostics,
                           wake_engine=wake_engine, melspec_model=melspec_model,
                           embedding_model=embedding_model, wake_threshold=wake_threshold,
-                          wake_consecutive=wake_consecutive, wake_cooldown=wake_cooldown)
+                          wake_consecutive=wake_consecutive, wake_cooldown=wake_cooldown,
+                          silence_end=silence_end, command_wait=command_wait)
     state = root / ".ovos"
     config_dir = state / "config" / "athena"
     config_dir.mkdir(parents=True, exist_ok=True)

@@ -115,6 +115,18 @@ agent fallback registers during loading, so startup completes without waiting
 for an intent-training acknowledgement or checking internet connectivity.
 Cloud/MCP connections are initialized lazily when you issue a command.
 
+## Recording pauses
+
+The listener waits up to five seconds for speech after activation and ends an
+utterance after two seconds of silence. This permits a one-second pause after
+the wake phrase even when its tail was classified as the start of speech.
+Longer end silence also delays each response by that amount. Configure these
+separately through `ATHENA_COMMAND_WAIT` and `ATHENA_SILENCE_END` in `.env`, or:
+
+```bash
+./run.sh --command-wait 5 --silence-end 2
+```
+
 ## Custom wake threshold
 
 The custom classifier uses fresh 80 ms predictions, with these initial settings:

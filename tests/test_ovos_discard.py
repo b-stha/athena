@@ -16,6 +16,7 @@ from wyoming.event import read_event, write_event
 from athena_ovos.listener import AthenaVoiceLoop, AthenaVoiceService
 from athena_ovos.plugins import AthenaMicrophone, AthenaWhisperSTT
 from athena_ovos.streaming import BufferedWhisperSTT
+from athena_ovos.runtime import build_config
 
 
 class SpeechDiscardTests(unittest.TestCase):
@@ -144,6 +145,32 @@ class SpeechDiscardTests(unittest.TestCase):
                 self.fail("OVOS did not finish buffering the synthetic recording.")
             time.sleep(0.005)
         return worker
+
+    def test_wake_tail_then_one_second_pause_keeps_recording_for_the_command(self):
+        # Rewound wake speech can satisfy VAD before the actual command starts.
+        # Exercise the real OVOS states/timer rather than checking only config.
+        self.loop.silence_seconds = build_config("fixture.onnx")["listener"]["silence_end"]
+        self.wake()
+        self.vad.is_silence.return_value = False
+        for _ in range(6):
+            if self.loop.state == ListeningState.BEFORE_COMMAND:
+                self.loop._before_cmd(self.chunk)
+        self.assertEqual(self.loop.state, ListeningState.IN_COMMAND)
+        self.vad.is_silence.return_value = True
+        for _ in range(50):
+            self.loop._in_cmd(self.chunk)
+        self.assertEqual(self.loop.state, ListeningState.IN_COMMAND)
+        # New command speech resets the ending timer; short pauses still work.
+        self.vad.is_silence.return_value = False
+        self.loop._in_cmd(self.chunk)
+        self.vad.is_silence.return_value = True
+        for _ in range(75):
+            self.loop._in_cmd(self.chunk)
+        self.assertEqual(self.loop.state, ListeningState.IN_COMMAND)
+        for _ in range(26):
+            if self.loop.state == ListeningState.IN_COMMAND:
+                self.loop._in_cmd(self.chunk)
+        self.assertEqual(self.loop.state, ListeningState.AFTER_COMMAND)
 
     def assert_discarded(self, worker):
         self.assertFalse(worker.is_alive())

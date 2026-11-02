@@ -86,6 +86,10 @@ def main():
                         help="log wake model scores and microphone levels for troubleshooting")
     parser.add_argument("--stt-timeout", type=float, default=30,
                         help="seconds to wait for transcription after recording (default: 30)")
+    parser.add_argument("--silence-end", type=float, default=os.getenv("ATHENA_SILENCE_END", "2"),
+                        help="silence before ending an utterance (default: 2 seconds)")
+    parser.add_argument("--command-wait", type=float, default=os.getenv("ATHENA_COMMAND_WAIT", "5"),
+                        help="initial wait for speech after waking (default: 5 seconds)")
     parser.add_argument("--check-config", action="store_true", help="validate plugins and model without recording")
     args = parser.parse_args()
 
@@ -112,6 +116,7 @@ def main():
             wake_engine=args.wake_engine, melspec_model=args.melspec_model,
             embedding_model=args.embedding_model, wake_threshold=args.wake_threshold,
             wake_consecutive=args.wake_consecutive, wake_cooldown=args.wake_cooldown,
+            silence_end=args.silence_end, command_wait=args.command_wait,
         )
         os.environ.update(env)
         check_plugins(config["hotwords"]["athena"]["module"])
@@ -122,6 +127,7 @@ def main():
             print(f"Precise wake settings: sensitivity {args.wake_sensitivity:g}, "
                   f"trigger level {args.wake_trigger_level}.", flush=True)
         print(f"Transcription timeout: {args.stt_timeout:g} seconds.", flush=True)
+        print(f"Voice timing: initial wait {args.command_wait:g}s, end silence {args.silence_end:g}s.", flush=True)
         if args.check_config:
             from ovos_plugin_manager.microphone import OVOSMicrophoneFactory
             from ovos_plugin_manager.stt import OVOSSTTFactory

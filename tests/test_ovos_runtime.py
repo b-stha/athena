@@ -15,6 +15,20 @@ from athena_ovos.runtime import _check_processes, build_config, prepare_environm
 
 
 class RuntimeConfigurationTests(unittest.TestCase):
+    def test_pause_timings_survive_config_generation_and_reject_invalid_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model = root / "test.onnx"
+            model.write_bytes(b"configuration fixture")
+            env, _ = prepare_environment(root, model, silence_end=2.5, command_wait=7)
+            saved = json.loads((Path(env["XDG_CONFIG_HOME"]) / "athena/mycroft.conf").read_text())
+            self.assertEqual(saved["listener"]["silence_end"], 2.5)
+            self.assertEqual(saved["listener"]["recording_timeout_with_silence"], 7)
+            for name in ("silence_end", "command_wait"):
+                for value in (0, -1, 31, float("inf"), float("nan"), True, "2", None):
+                    with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                        prepare_environment(root, model, **{name: value})
+
     def test_missing_or_empty_model_stops_before_generating_runtime_config(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
