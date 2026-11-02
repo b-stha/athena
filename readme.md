@@ -44,6 +44,29 @@ The legacy closed command grammar and direct HA REST helper remain in the source
 but only `--legacy-text` selects that path today. Merely retaining that code does
 not make normal voice/text requests hybrid or usable without the cloud model.
 
+## Active development priorities
+
+The two active workstreams are **speech reliability** and **a scoped local /
+contextual action planner**. The agreed next design keeps HA MCP as a last-resort
+contextual route when local intent resolution is insufficient. A local backend
+timeout is an execution failure, not a reason to repeat the action through MCP.
+Unintelligible speech can require clarification instead of a paid model request.
+
+For speech, assess the custom OWW detector independently from capture/VAD and
+Whisper. The Pi currently advertises faster-whisper **`base-int8`**. Compare the
+same recorded command sent directly to Whisper and through the OVOS handoff
+before deciding which component to replace. Quiet-speech misses and false wakes
+require separate measurements; reducing the classifier threshold trades one
+against the other.
+
+For routing, first define the supported typed actions, aliases, context rules,
+compound-command semantics and cloud budget. Routine actions should execute
+and acknowledge locally even when cloud credentials/quota are unavailable.
+Contextual fallback should receive only relevant tools and verified action
+history. The acceptance criteria and implementation sequence are in the
+[development plan](docs/DEVELOPMENT_PLAN.md). These are planned changes; normal
+runtime requests still use the existing cloud agent until that work is delivered.
+
 ## Planned local and contextual boundary
 
 The unit of routing should be an **action or clause**, rather than the whole
