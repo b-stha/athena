@@ -243,6 +243,13 @@ flags. The retained OVOS loop has about 200 ms rewind; some development wake
 delays exceeded that, so immediate-command beginnings can still be clipped.
 TTS is not implemented; transcripts and responses are visible in the journal.
 
+The [2026-11-01 recorded speech comparison](docs/SPEECH_BASELINE_20261101.md)
+ran eight existing command clips through the actual OVOS recording loop and
+local Whisper. All eight activated; exact command transcriptions were 6/8 for
+full recordings and 5/8 for retained audio. Longer rewind stayed at 5/8 and
+disabling final VAD trimming fell to 2/8, so live settings remain unchanged.
+These reused development recordings do not establish fresh or live accuracy.
+
 Next voice work is reviewed quiet/normal/distant positives, long representative
 speech/music/room negatives and fresh held-out sessions; then compare wake
 recall, false activations, command capture and STT accuracy before selecting a
