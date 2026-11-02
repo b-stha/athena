@@ -1,0 +1,10 @@
+# Main inference pins: Linux/aarch64, Python 3.10 or 3.11.
+# Python 3.11 Pi validation and full resolved lock: see WAKE_VALIDATION.md.
+# Not a training lock or complete transitive lock; Python 3.10 is not tested.
+# Install into .venv-wake, separately from Athena's OVOS environment.
+openwakeword==0.6.0
+numpy==1.26.4
+onnxruntime==1.20.1
+sounddevice==0.5.1
+# Required by the released package metadata even with explicit ONNX inference.
+tflite-runtime==2.14.0; platform_system == "Linux"

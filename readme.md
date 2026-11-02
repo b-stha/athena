@@ -34,7 +34,8 @@ transports and result validation.
 ## Current features
 
 - Single-word `Athena` wake detection using an existing Precise ONNX model.
-  Setup downloads the model; training a custom openWakeWord model is unnecessary.
+  Setup downloads that model. Custom **hey athena** openWakeWord development is
+  an opt-in experiment; see [recording and evaluation](voice/WAKE_EVALUATION.md).
 - Automatic command recording, with a 0.8-second silence boundary, a five-second
   wait for speech and a 30-second recording limit.
 - Deterministic intent handlers for lights, desktop applications and PC power

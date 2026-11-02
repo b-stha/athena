@@ -9,6 +9,13 @@ recording and openWakeWord loop is retired.
 Run on the Pi with the microphone attached. SSH does not forward the PC's
 microphone, and voice mode does not need an interactive terminal.
 
+For the new custom **hey athena** evaluation work, see
+[recording, replay and buffered handoff](WAKE_EVALUATION.md) and
+[training compatibility and data collection](TRAINING.md). Those tools are
+opt-in and do not change this OVOS launcher.
+The [current training setup](TRAINING_SETUP.md) includes the ready-to-run Pi
+recording command and the PC's persistent GPU pause control.
+
 ## Install
 
 From the repository on the Pi:

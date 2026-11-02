@@ -1,4 +1,7 @@
 .venv/
+.venv-wake/
+.wake/
+.wake-home
 .env
 __pycache__/
 .ovos/
