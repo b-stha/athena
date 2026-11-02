@@ -51,7 +51,7 @@ class PowerCommandTests(unittest.TestCase):
     def test_failure_is_not_retried_or_reported_as_accepted(self):
         for action in self.phrases:
             output = io.StringIO()
-            with self.subTest(action=action), patch("sys.argv", ["main.py", "--text"]), \
+            with self.subTest(action=action), patch("sys.argv", ["main.py", "--legacy-text"]), \
                  patch("builtins.input", side_effect=[f"{action} pc", "exit"]), \
                  patch("router.desktop.send_command", side_effect=requests.Timeout) as send, \
                  patch("router.desktop.wake_pc") as wake, redirect_stdout(output):
@@ -63,7 +63,7 @@ class PowerCommandTests(unittest.TestCase):
     def test_failed_desktop_response_is_not_reported_as_accepted(self):
         for action in self.phrases:
             output = io.StringIO()
-            with self.subTest(action=action), patch("sys.argv", ["main.py", "--text"]), \
+            with self.subTest(action=action), patch("sys.argv", ["main.py", "--legacy-text"]), \
                  patch("builtins.input", side_effect=[f"{action} pc", "exit"]), \
                  patch.dict("os.environ", {"DESKTOP_URL": "http://desktop:5000"}), \
                  patch.object(desktop, "uuid4", return_value="test-id"), \
@@ -81,7 +81,7 @@ class PowerCommandTests(unittest.TestCase):
     def test_acknowledgment_is_reported(self):
         for action in self.phrases:
             output = io.StringIO()
-            with self.subTest(action=action), patch("sys.argv", ["main.py", "--text"]), \
+            with self.subTest(action=action), patch("sys.argv", ["main.py", "--legacy-text"]), \
                  patch("builtins.input", side_effect=[f"{action} pc", "exit"]), \
                  patch("router.desktop.send_command", return_value={"success": True}), \
                  redirect_stdout(output):

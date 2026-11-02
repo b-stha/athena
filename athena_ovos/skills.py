@@ -1,4 +1,4 @@
-"""Run Athena's Adapt skill without unrelated training or connectivity probes."""
+"""Run Athena's agent bridge without unrelated training or connectivity probes."""
 
 import ovos_core.__main__ as core
 from ovos_core.skill_manager import SkillManager
@@ -10,7 +10,7 @@ class AthenaSkillManager(SkillManager):
     """Use the native skill lifecycle with Athena as the only managed skill."""
 
     def _load_new_skills(self, network=None, internet=None, gui=None):
-        # Adapt registers Athena's intents during loading and needs no separate
+        # Athena registers its transcript fallback during loading and needs no
         # training acknowledgement. The inherited loader reports success.
         if "athena-skill" not in self.plugin_skills and "athena-skill" not in self.blacklist:
             self._load_plugin_skill("athena-skill", AthenaSkill)

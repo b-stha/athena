@@ -37,7 +37,7 @@ def build_config(model, *, device="reSpeaker Flex XVF3800", bus_port=8181,
         "websocket": {"host": "127.0.0.1", "port": bus_port, "route": "/core", "ssl": False},
         "gui": {"disable_gui": True},
         "utterance_transformers": {}, "intent_transformers": {},
-        "intents": {"pipeline": ["adapt_high", "adapt_medium", "adapt_low", "fallback_low"]},
+        "intents": {"pipeline": ["fallback_low"]},
         "skills": {"fallbacks": {"fallback_mode": "whitelist", "fallback_whitelist": ["athena-skill"]}},
         "listener": {
             "sample_rate": 16000, "wake_word": "athena", "stand_up_word": "athena",

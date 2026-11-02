@@ -1,140 +1,106 @@
 # Athena
 
-Athena is a personal assistant hosted on a Raspberry Pi 5. OpenVoiceOS (OVOS)
-manages microphone input, wake detection, command recording, transcription and
-intent matching. Athena's handlers send home-device actions to Home Assistant
-and desktop actions to the companion C#/.NET Windows client.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    Mic["reSpeaker microphone"] --> Listener["OVOS listener: Athena wake word and recording"]
-    Listener --> Whisper["Local Whisper through Wyoming"]
-    Whisper --> Intents["OVOS deterministic intents"]
-    Intents --> Handlers["Athena action handlers"]
-    Intents --> Context["Context request event: future reasoning and MCP fallback"]
-    Text["Typed debug commands"] --> Handlers
-    Handlers --> HA["Home Assistant REST API"]
-    Handlers --> Desktop["Athena Desktop HTTP API"]
-    Handlers --> WOL["UDP Wake-on-LAN"]
-    HA --> Home["Lights and rooms"]
-    Desktop --> Windows["Applications, shutdown, restart and sleep"]
-```
-
-OVOS owns the voice pipeline and intent dispatch. Whisper remains the local STT
-engine; an Athena plugin connects OVOS to the existing Wyoming server. Athena's
-microphone plugin supplies the processed second channel of the reSpeaker Flex
-XVF3800. OVOS then handles wake detection and speech endpointing.
-
-[Athena Desktop](https://github.com/b-stha/athena-desktop) remains a separate
-Windows app. Home Assistant and desktop integrations retain their existing
-transports and result validation.
-
-## Current features
-
-- Single-word `Athena` wake detection using an existing Precise ONNX model.
-  Setup downloads that model. Custom **hey athena** openWakeWord development is
-  an opt-in experiment; see [recording and evaluation](voice/WAKE_EVALUATION.md).
-- Automatic command recording, with a 0.8-second silence boundary, a five-second
-  wait for speech and a 30-second recording limit.
-- Deterministic intent handlers for lights, desktop applications and PC power
-  actions, with target validation before execution.
-- Home Assistant commands for Nanoleaf desk lights, Govee Table Glow and Under
-  Glow, the Bedroom area and Philips Hue bathroom lights.
-- Desktop HTTP commands with generated request IDs, response validation, a
-  five-second timeout and no automatic retries.
-- Wake-on-LAN through a UDP magic packet, without requiring the desktop app to
-  be running. Packet delivery does not confirm PC startup.
-- `--text` mode for debugging commands without a microphone or OVOS services.
-
-Examples after saying `Athena`:
+Athena is a Raspberry Pi 5 voice assistant. OVOS captures and transcribes speech
+using the existing reSpeaker, wake/VAD and local Whisper/Wyoming layers. Every
+completed transcript now goes to a Pi-hosted agent that uses a configurable
+cloud model and two independent MCP backends.
 
 ```text
-turn on nanoleafs
-turn off table glow
-turn on under glow
-turn off bedroom lights
-turn on bathroom lights
-open notepad
-turn on my pc
-shutdown pc
-restart my pc
-sleep pc
+reSpeaker -> OVOS wake + recording -> local Whisper -> Athena agent on Pi
+                                                         |
+                                 cloud model API <-------+-- MCP -> Home Assistant
+                                                         +-- MCP -> Windows-MCP on PC
+                                                         +-- native Wake-on-LAN
 ```
 
-The first OVOS integration prints transcripts and acknowledgments in the terminal
-and records service logs. Spoken acknowledgments
-and a TTS service are not configured yet. A successful power-command response
-confirms acceptance by the desktop client, not completion of the Windows action.
+The Pi owns conversation state, tool selection/dispatch and result handling.
+The cloud model does not connect directly to your LAN. Athena Desktop supervises
+Windows-MCP in the signed-in Windows session; Home Assistant exposes its own MCP
+integration. Both servers are reached through authenticated Streamable HTTP.
 
-## Setup and running
+## Setup and run
 
-Run on the Pi with its microphone attached, using this branch of the repository:
+Follow [agent setup](docs/AGENT_SETUP.md) for cloud model credentials, MCP URLs,
+network configuration, image support and limits. The model/provider is chosen
+explicitly: this branch does not create a cloud account, select a model, contact
+live devices, or migrate credentials automatically.
+
+On the Pi:
 
 ```bash
 sudo apt-get install python3-venv libportaudio2
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -r requirements.txt -r requirements-agent.txt
+.venv/bin/python -m pip install -e '.[agent]'
 .venv/bin/python -m athena_ovos.setup
 ```
 
-Configure `.env` with `HA_URL` and `HA_TOKEN` for Home Assistant and `DESKTOP_URL`
-for the Windows client. Keep the existing Wyoming Whisper service running on
-`tcp://127.0.0.1:10300`, or set `WHISPER_URI` to its address.
-
-Validate configuration and model loading, then start the voice frontend:
+Merge `.env.example` into your ignored `.env` and copy `agent.example.json` to
+ignored `agent.local.json`, replacing example URLs/settings locally. Keep the
+existing Wyoming Whisper service running (default `tcp://127.0.0.1:10300`).
 
 ```bash
-./run.sh --check-config
-./run.sh
+./run.sh --check-agent-config  # settings only, no network or tool calls
+./run.sh --text                # cloud agent, microphone-free
+./run.sh --check-config        # existing voice plugin/wake-model checks
+./run.sh                       # normal voice operation
 ```
 
-The configuration check does not open the microphone or execute commands.
-Athena stores generated OVOS configuration, model files, logs and caches under
-the ignored `.ovos` directory. Ctrl-C stops the frontend and its OVOS services.
+The same agent handles voice and typed requests. Original deterministic REST
+routing remains available only through `--legacy-text` for diagnostics. It is
+not automatically tried after an uncertain model/MCP failure.
 
-Typed debugging remains available:
+## Agent behavior
+
+- Discover HA/Windows tool schemas, namespace names and validate arguments.
+- Serialize requests and tool execution with bounded calls, rounds and history.
+- Allow healthy backends to work when another MCP server is unavailable.
+- Report unknown execution outcomes without retrying or continuing the batch.
+- Forward bounded screenshots to a vision-capable cloud model when explicitly
+  enabled; otherwise explain that the image was not forwarded.
+- Keep `native__wake_pc` on the Pi so PC wake does not depend on Windows-MCP.
+- Initialize model/MCP connections lazily; close owned sessions on shutdown.
+
+Cloud requests include transcripts, recent conversation and selected tool
+results. With `vision=true` they can include desktop screenshots. Conversation
+is memory-only; prior-turn screenshots are discarded. Choose exposed tools and
+provider settings accordingly. Spoken acknowledgments/TTS remain unfinished:
+responses currently appear in the terminal and OVOS speak events.
+
+## Voice and unfinished evaluation
+
+The microphone, VAD, wake and transcription implementations are retained. The
+current normal launcher uses the existing single-word **Athena** Precise ONNX
+model. Custom **hey athena** openWakeWord collection/training/evaluation remains
+opt-in; hardware accuracy testing is intentionally deferred until after this
+architecture migration.
+
+See [voice setup](voice/README.md), [wake evaluation](voice/WAKE_EVALUATION.md),
+[training](voice/TRAINING.md), and [current training setup](voice/TRAINING_SETUP.md).
+External datasets and ignored training workspaces are not moved or deleted by
+this rebuild. A new worktree does not copy those ignored data directories.
+
+## Development and validation
+
+The architecture contract is in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Agent-only development can install `requirements-agent.txt` without OVOS and run:
 
 ```bash
-./run.sh --text
+python -m unittest discover -s tests -p 'test_agent*.py' -v
 ```
 
-See [voice setup](voice/README.md) for microphone, model and listener details and
-[desktop integration](integrations/README.md) for HTTP, Wake-on-LAN and power
-configuration. The previous Space-controlled recorder is replaced by OVOS.
-
-Run automated checks after installing the package:
+With full voice dependencies installed:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests use fake microphone frames and backend actions. They verify integration
-contracts and command handling; live wake-word accuracy with your microphone
-still needs to be tested.
+Tests use fake model/MCP endpoints and microphone frames. The HTTP integration
+uses the real pinned MCP SDK with two local fake servers and a fake cloud
+endpoint, including pagination, authentication, image forwarding and uncertain
+outcomes. Linux service tests and live Pi/microphone/device/cloud validation are
+separate checks. No live PC power actions are performed by automated tests.
 
-## Planned features
-
-Unmatched requests can reach the `athena.context.request` message-bus event for a
-future contextual reasoning and MCP consumer. That consumer is not implemented
-yet. The intended architecture remains deterministic commands first, followed by
-contextual reasoning when the request needs it.
-
-Brightness commands, scenes, desktop window management and spoken responses
-remain planned additions.
-
-## Stack
-
-- Python and Raspberry Pi 5
-- OVOS core, message bus, Dinkum listener and intent handlers
-- Precise ONNX wake detection and WebRTC VAD
-- Local Whisper through Wyoming and Docker
-- Home Assistant REST API
-- HTTP/JSON and UDP Wake-on-LAN
-- Companion Windows app: C#/.NET
-
-OVOS references: [listener](https://github.com/OpenVoiceOS/ovos-dinkum-listener),
-[core](https://github.com/OpenVoiceOS/ovos-core),
-[Precise ONNX](https://github.com/OpenVoiceOS/ovos-ww-plugin-precise-onnx).
+The retained [legacy integrations](integrations/README.md) document the previous
+REST action paths. [Athena Desktop](https://github.com/b-stha/athena-desktop)
+contains the Windows-MCP supervisor and explicit legacy command-server mode.

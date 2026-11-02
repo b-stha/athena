@@ -1,10 +1,9 @@
-"""Exercise real Adapt matching with injected backend calls and no microphone."""
+"""Legacy structured actions and the new transcript-to-agent boundary."""
 
 import unittest
 from unittest.mock import Mock, patch
 
 import requests
-from ovos_adapt.engine import IntentDeterminationEngine
 from ovos_bus_client.message import Message
 from ovos_utils.fakebus import FakeBus
 
@@ -60,130 +59,61 @@ class StructuredActionTests(unittest.TestCase):
             home.assert_not_called()
 
 
-class OVOSIntentTests(unittest.TestCase):
+class OVOSAgentBridgeTests(unittest.TestCase):
     def setUp(self):
-        # Keep the real Skill methods, Message and Adapt parser. Skip framework
-        # startup to avoid settings files, websocket threads and audio output.
         self.skill = AthenaSkill.__new__(AthenaSkill)
         self.skill._bus = FakeBus()
+        self.addCleanup(self.skill.bus.close)
         self.skill.log = Mock()
         self.skill.speak = Mock()
-        self.skill.default_shutdown = Mock()
+        self.skill.register_fallback = Mock()
+        self.skill.register_intent = Mock()
         self.events = []
         for topic in [ACTION_RESULT, CONTEXT_REQUEST]:
             self.skill.bus.on(topic, self.events.append)
-        self.engine = IntentDeterminationEngine()
-        self.skill.register_vocabulary = Mock(
-            side_effect=lambda word, entity, **kwargs: self.engine.register_entity(word, entity))
-        self.skill.register_intent = Mock(
-            side_effect=lambda builder, handler: self.engine.register_intent_parser(builder.build()))
-        self.skill.register_fallback = Mock()
-        self.skill.initialize()
+        self.worker = Mock()
+        self.worker.submit.return_value = True
+        with patch("athena_agent.worker.AgentWorker", return_value=self.worker):
+            self.skill.initialize()
 
-    def dispatch(self, utterance):
-        matches = list(self.engine.determine_intent(utterance))
-        if not matches:
-            self.skill.handle_context(Message("fallback", {"utterances": [utterance]}))
-            return
-        message = Message(matches[0]["intent_type"], matches[0] | {"utterance": utterance},
-                          {"session": {"session_id": "test-session"}})
-        self.skill.handle_command(message)
-
-    def test_framework_matches_power_variants_and_dispatches_only_once(self):
-        for phrase, expected in [("sleep pc", "sleep"), ("put my computer to sleep", "sleep"),
-                                 ("send the desktop to sleep", "sleep"), ("reboot my desktop", "restart"),
-                                 ("turn off the computer", "shutdown"), ("wake up my pc", "wake")]:
-            with self.subTest(phrase=phrase), patch("router.desktop.execute") as execute, \
-                 patch("router.home_assistant.call_service") as home:
+    def test_every_transcript_goes_to_agent_without_language_parsing(self):
+        for text in ["sleep pc", "do not sleep pc", "put that over there", "turn off lights and open notepad"]:
+            with self.subTest(text=text), patch("router.desktop.execute") as desktop, patch("router.home_assistant.call_service") as home:
                 self.events.clear()
-                self.assertTrue(list(self.engine.determine_intent(phrase)))
-                self.dispatch(phrase)
-                execute.assert_called_once_with(expected, "pc")
-                home.assert_not_called()
-                self.assertEqual(len(self.events), 1)
-                self.assertEqual(self.events[0].msg_type, ACTION_RESULT)
-                self.assertTrue(self.events[0].data["success"])
-                self.assertNotIn("session", self.events[0].data)
-                self.assertEqual(self.events[0].context["session"]["session_id"], "test-session")
-
-    def test_framework_keeps_home_and_desktop_backends_separate(self):
-        with patch("router.home_assistant.call_service") as home, patch("router.desktop.execute") as desktop:
-            self.dispatch("switch off bedroom lights")
-            home.assert_called_once_with("light", "turn_off", area_id="bedroom")
-            desktop.assert_not_called()
-        with patch("router.home_assistant.call_service") as home, patch("router.desktop.execute") as desktop:
-            self.dispatch("open notepad")
-            desktop.assert_called_once_with("launch_app", "notepad")
-            home.assert_not_called()
-
-    def test_keyword_false_positives_never_execute_negated_or_ambiguous_commands(self):
-        # Adapt may find positive keywords inside a negative sentence. The
-        # complete grammar must reject it at the handler boundary.
-        for utterance in ["don't sleep pc", "do not reboot my pc", "sleep pc and shutdown pc",
-                          "turn off bedroom and bathroom", "what happens when I sleep pc"]:
-            with self.subTest(utterance=utterance), patch("router.desktop.execute") as desktop, \
-                 patch("router.home_assistant.call_service") as home:
-                self.events.clear()
-                self.dispatch(utterance)
+                message = Message("fallback", {"utterances": [text]}, {"session": {"session_id": "room"}})
+                self.assertTrue(self.skill.handle_context(message))
+                args = self.worker.submit.call_args
+                self.assertEqual(args.args[0], text)
+                self.assertEqual(args.kwargs["session_id"], "room")
+                self.assertEqual(self.events[0].data, {"utterance": text, "reason": "agent_request"})
                 desktop.assert_not_called()
                 home.assert_not_called()
-                self.assertEqual(len(self.events), 1)
-                self.assertEqual(self.events[0].msg_type, CONTEXT_REQUEST)
-
-    def test_unknown_contextual_request_uses_one_boundary_and_never_a_backend(self):
-        with patch("router.desktop.execute") as desktop, patch("router.home_assistant.call_service") as home:
-            self.dispatch("put that to sleep")
-            desktop.assert_not_called()
-            home.assert_not_called()
-        self.assertEqual(len(self.events), 1)
-        self.assertEqual(self.events[0].data,
-                         {"utterance": "put that to sleep", "reason": "no_deterministic_match"})
+        self.skill.register_intent.assert_not_called()
         self.skill.register_fallback.assert_called_once_with(self.skill.handle_context, 91)
 
-    def test_backend_failure_is_reported_without_fallback_or_retry(self):
-        with patch("router.desktop.execute", side_effect=requests.Timeout("timeout")) as execute:
-            self.dispatch("sleep pc")
-            execute.assert_called_once_with("sleep", "pc")
-        self.assertEqual(len(self.events), 1)
-        self.assertEqual(self.events[0].msg_type, ACTION_RESULT)
-        self.assertFalse(self.events[0].data["success"])
-        self.assertNotIn("accepted", self.skill.speak.call_args.args[0].lower())
+    def test_response_and_error_callbacks_preserve_message_context(self):
+        message = Message("fallback", {"utterance": "hello"}, {"session": {"session_id": "room"}})
+        self.skill.handle_context(message)
+        self.worker.submit.call_args.args[1]("Agent response")
+        self.assertEqual(self.events[-1].data, {"status": "agent_response", "response": "Agent response"})
+        self.assertEqual(self.events[-1].context["session"]["session_id"], "room")
+        self.skill.speak.assert_called_with("Agent response")
+        self.worker.submit.call_args.args[2]("Configuration failed")
+        self.assertEqual(self.events[-1].data["status"], "failed")
 
-    def test_failed_backend_response_is_not_acknowledged(self):
-        with patch("router.desktop.execute", side_effect=ValueError("Sleep rejected.")) as execute:
-            self.dispatch("sleep pc")
-            execute.assert_called_once_with("sleep", "pc")
-        self.assertEqual(self.events[0].data["error"], "Sleep rejected.")
-        self.assertFalse(self.events[0].data["success"])
-        self.assertNotIn("accepted", self.skill.speak.call_args.args[0].lower())
+    def test_empty_input_is_not_enqueued_and_busy_is_reported(self):
+        for data in [{}, {"utterance": None}, {"utterances": "sleep pc"}, {"utterances": [42]}, {"utterance": "   "}]:
+            message = Message("fallback", data)
+            self.assertFalse(self.skill.can_answer(message))
+            self.assertFalse(self.skill.handle_context(message))
+        self.worker.submit.assert_not_called()
+        self.worker.submit.return_value = False
+        self.skill.handle_context(Message("fallback", {"utterance": "hello"}))
+        self.assertIn("still handling", self.skill.speak.call_args.args[0])
 
-    def test_power_ack_and_wake_confirmation_are_distinct(self):
-        for action in ["shutdown", "restart", "sleep", "wake"]:
-            with self.subTest(action=action), patch("router.desktop.execute"):
-                self.dispatch(f"{action} pc")
-            response = self.skill.speak.call_args.args[0]
-            if action == "wake":
-                self.assertIn("not confirmed", response)
-                self.assertNotIn("accepted", response)
-            else:
-                self.assertIn(f"{action.capitalize()} accepted by the desktop client.", response)
-
-    def test_intent_slots_cannot_override_original_sentence(self):
-        message = Message("SleepDesktop", {"utterance": "don't sleep pc",
-                                           "DesktopTarget": "pc", "SleepDesktopVerb": "sleep"})
-        with patch("router.desktop.execute") as execute:
-            self.skill.handle_command(message)
-            execute.assert_not_called()
-        self.assertEqual(self.events[0].msg_type, CONTEXT_REQUEST)
-
-    def test_empty_or_malformed_input_is_not_handled(self):
-        for data in [{}, {"utterance": None}, {"utterances": "sleep pc"}, {"utterances": [42]},
-                     {"utterance": "   "}]:
-            with self.subTest(data=data):
-                message = Message("fallback", data)
-                self.assertFalse(self.skill.can_answer(message))
-                self.assertFalse(self.skill.handle_context(message))
-        self.assertEqual(self.events, [])
+    def test_shutdown_closes_owned_worker(self):
+        self.skill.shutdown()
+        self.worker.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

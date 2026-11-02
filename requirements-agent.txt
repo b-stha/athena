@@ -1,0 +1,6 @@
+# Explicitly tested MCP 1.x transport API; 2.x is a separate migration.
+mcp==1.26.0
+httpx>=0.28,<0.29
+jsonschema>=4.23,<5
+python-dotenv>=1,<2
+requests>=2.32,<3

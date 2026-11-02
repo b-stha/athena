@@ -1,5 +1,7 @@
 .venv/
 .venv-wake/
+.venv-agent/
+agent.local.json
 .wake/
 .wake-home
 .env

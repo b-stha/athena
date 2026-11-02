@@ -5,9 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "athena-ovos"
 version = "0.1.0"
-description = "OVOS voice frontend for Athena's Home Assistant and desktop backends"
+description = "Pi-hosted voice agent using cloud reasoning and Home Assistant/Windows MCP tools"
 requires-python = ">=3.10"
 dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+agent = ["mcp==1.26.0", "httpx>=0.28,<0.29", "jsonschema>=4.23,<5"]
 
 [project.entry-points."opm.skill"]
 athena-skill = "athena_skill:AthenaSkill"
@@ -30,7 +33,7 @@ athena-precise-onnx = "athena_ovos.wake:AthenaPreciseWakeWord"
 py-modules = ["router"]
 
 [tool.setuptools.packages.find]
-include = ["athena_ovos*", "athena_skill*", "athena_wake*", "integrations*"]
+include = ["athena_ovos*", "athena_skill*", "athena_wake*", "athena_agent*", "integrations*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

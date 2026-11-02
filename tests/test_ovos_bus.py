@@ -1,4 +1,4 @@
-"""Run the published OVOS bus/core and exercise Athena through loopback HTTP."""
+"""Run the real OVOS bus/core with a fake agent and no microphone or cloud calls."""
 
 import json
 import os
@@ -113,6 +113,17 @@ def local_wait(self, message, *args, **kwargs):
     return original_wait(self, message, *args, **kwargs)
 
 MessageBusClient.wait_for_response = local_wait
+# Only the reasoning dependency is fake; the bus, core and skill are real.
+import athena_agent.worker as worker
+class FakeAgent:
+    async def turn(self, text, session_id="default"):
+        return "Handled: " + text
+    async def close(self):
+        pass
+original_init = worker.AgentWorker.__init__
+def fake_init(self, **kwargs):
+    original_init(self, factory=FakeAgent)
+worker.AgentWorker.__init__ = fake_init
 READY.write_text("ready", encoding="utf-8")
 """
             (guard_dir / "sitecustomize.py").write_text(guard_source, encoding="utf-8")
@@ -226,46 +237,14 @@ READY.write_text("ready", encoding="utf-8")
         self.assertTrue(self.startup_guard_ready.exists(), self.log_tail())
         self.assertFalse(self.startup_guard_hit.exists(), self.log_tail())
 
-    def test_recognized_commands_reach_exactly_one_existing_backend(self):
-        examples = [
-            ("sleep my pc", "sleep", "/commands", {"command": "sleep", "parameters": {}}),
-            ("reboot desktop", "restart", "/commands", {"command": "restart", "parameters": {}}),
-            ("open notepad", "launch_app", "/commands",
-             {"command": "launch_app", "parameters": {"name": "notepad"}}),
-            ("turn on bedroom", "turn_on", "/api/services/light/turn_on", {"area_id": "bedroom"}),
-        ]
-        for utterance, action, path, body in examples:
+    def test_all_transcripts_reach_the_agent_once_without_rest_execution(self):
+        for utterance in ["sleep my pc", "open notepad", "turn on bedroom", "do not sleep my pc", "put that to sleep", "turn on bedroom and bathroom"]:
             with self.subTest(utterance=utterance):
-                with self.request_lock:
-                    self.requests.clear()
                 self.emit_utterance(utterance)
+                context = self.receive(self.context_requests)
+                self.assertEqual(context.data, {"utterance": utterance, "reason": "agent_request"})
                 result = self.receive(self.results)
-                self.assertTrue(result.data["success"], result.data)
-                self.assertEqual(result.data["action"]["action"], action)
-                # Drain enough time to catch duplicate execution/dispatch.
-                time.sleep(0.1)
-                with self.request_lock:
-                    actual = list(self.requests)
-                self.assertEqual(len(actual), 1, actual)
-                actual_path, actual_body, authorization = actual[0]
-                self.assertEqual(actual_path, path)
-                if path == "/commands":
-                    self.assertIsInstance(actual_body.pop("requestId"), str)
-                    self.assertEqual(actual_body, body)
-                else:
-                    self.assertEqual(actual_body, body)
-                    self.assertEqual(authorization, "Bearer test-token")
-                self.assertTrue(self.context_requests.empty())
-                self.assertTrue(self.results.empty())
-
-    def test_negation_compound_and_context_requests_never_execute_a_backend(self):
-        for utterance in ["don't sleep my pc", "sleep pc and reboot desktop",
-                          "put that to sleep", "turn on bedroom and bathroom"]:
-            with self.subTest(utterance=utterance):
-                self.emit_utterance(utterance)
-                message = self.receive(self.context_requests)
-                self.assertEqual(message.data["utterance"], utterance)
-                self.assertEqual(message.data["reason"], "no_deterministic_match")
+                self.assertEqual(result.data, {"status": "agent_response", "response": "Handled: " + utterance})
                 time.sleep(0.1)
                 with self.request_lock:
                     self.assertEqual(self.requests, [])

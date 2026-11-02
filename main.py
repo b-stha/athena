@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from requests.exceptions import RequestException
 
 
-def text_mode():
+def legacy_text_mode():
     from router import route
     print("Athena - type a command, or exit to quit.")
     while True:
@@ -32,11 +32,38 @@ def text_mode():
             print(f"Command failed: {error}")
 
 
+def text_mode():
+    import asyncio
+    from athena_agent.agent import Agent
+    from athena_agent.config import AgentConfig
+
+    async def chat():
+        agent = Agent(AgentConfig.from_env())
+        print("Athena agent - type a command, or exit to quit.")
+        try:
+            while True:
+                try:
+                    command = input("athena> ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    return 0
+                if command.lower() in {"exit", "quit"}:
+                    return 0
+                if command:
+                    print(await agent.turn(command))
+        finally:
+            await agent.close()
+    return asyncio.run(chat())
+
+
 def main():
     root = Path(__file__).resolve().parent
     load_dotenv(root / ".env")
+    os.environ.setdefault("ATHENA_AGENT_CONFIG", str(root / "agent.local.json"))
     parser = argparse.ArgumentParser(description="Athena's OVOS voice frontend")
-    parser.add_argument("--text", action="store_true", help="type commands to test the backends")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--text", action="store_true", help="type requests for the same agent used by voice")
+    modes.add_argument("--legacy-text", action="store_true", help="diagnose the retired deterministic REST backends")
+    modes.add_argument("--check-agent-config", action="store_true", help="validate model/MCP settings without connecting")
     parser.add_argument("--model", type=Path, help="use a different Precise Athena ONNX model")
     parser.add_argument("--mic-device", default="reSpeaker Flex XVF3800", help="PortAudio microphone name")
     parser.add_argument("--bus-port", type=int, default=8181, help="local OVOS bus port")
@@ -55,6 +82,15 @@ def main():
         raise KeyboardInterrupt
     previous = signal.signal(signal.SIGTERM, stop)
     try:
+        if args.legacy_text:
+            return legacy_text_mode()
+        if args.check_agent_config:
+            from athena_agent.config import AgentConfig
+            config = AgentConfig.from_env()
+            print("Agent configuration is valid. Configured MCP servers: " +
+                  ", ".join(server.name for server in config.servers))
+            print("No model request, MCP connection or device action was made.")
+            return 0
         if args.text:
             return text_mode()
         from athena_ovos.runtime import check_plugins, prepare_environment, run

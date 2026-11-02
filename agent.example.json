@@ -1,0 +1,18 @@
+{
+  "servers": [
+    {"name": "ha", "url": "http://homeassistant.local:8123/api/mcp", "token_env": "ATHENA_HA_MCP_TOKEN"},
+    {"name": "windows", "url": "http://windows-pc:8000/mcp", "token_env": "ATHENA_WINDOWS_MCP_TOKEN"}
+  ],
+  "model_timeout": 60,
+  "tool_timeout": 30,
+  "discovery_timeout": 5,
+  "max_rounds": 8,
+  "max_calls": 16,
+  "history_turns": 6,
+  "history_chars": 48000,
+  "max_result_chars": 16000,
+  "max_image_bytes": 4000000,
+  "max_images": 4,
+  "vision": false,
+  "system_prompt": ""
+}

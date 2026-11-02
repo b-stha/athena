@@ -23,8 +23,8 @@ From the repository on the Pi:
 ```bash
 sudo apt-get install python3-venv libportaudio2
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -r requirements.txt -r requirements-agent.txt
+.venv/bin/python -m pip install -e '.[agent]'
 .venv/bin/python -m athena_ovos.setup
 ```
 
@@ -42,8 +42,10 @@ it in the repository's `.env` if necessary:
 WHISPER_URI=tcp://127.0.0.1:10300
 ```
 
-Backend settings such as `HA_URL`, `HA_TOKEN`, `DESKTOP_URL` and the Wake-on-LAN
-configuration remain in `.env`. Athena loads them before starting OVOS services.
+Cloud model, MCP token and Wake-on-LAN settings remain in `.env`. Configure
+`agent.local.json` using [agent setup](../docs/AGENT_SETUP.md). Legacy `HA_URL`,
+`HA_TOKEN` and `DESKTOP_URL` are used only by `--legacy-text` diagnostics. Athena
+loads environment settings before starting OVOS services.
 OVOS configuration and caches are isolated under `.ovos`, leaving other OVOS
 installations' settings separate.
 
@@ -87,13 +89,13 @@ For typed command debugging:
 ./run.sh --text
 ```
 
-Text mode skips the voice frontend and its model. `--manual` and Space-controlled
+Text mode skips the microphone and wake model and uses the same cloud agent as voice. `--manual` and Space-controlled
 recording are removed.
 
 The skills process loads only Athena's skill through OVOS's native loader. Its
-Adapt intents register during loading, so startup completes without waiting for
-an intent-training acknowledgement or checking internet connectivity. Backend
-connections are checked when you issue a command.
+agent fallback registers during loading, so startup completes without waiting
+for an intent-training acknowledgement or checking internet connectivity.
+Cloud/MCP connections are initialized lazily when you issue a command.
 
 ## Wake sensitivity
 
@@ -212,16 +214,21 @@ performance and recognition quality need a separate check.
 Stopping Athena discards an unfinished recording and joins the framework's
 buffer worker, without requesting transcription of that partial command.
 
-## Intents and contextual requests
+## Agent requests
 
-OVOS passes recognized speech to Athena's deterministic intent handlers. Those
-handlers validate their targets and invoke the existing Home Assistant, desktop
-HTTP or Wake-on-LAN integration. A recognized command that fails execution is
-reported as a failure.
+OVOS forwards every completed transcript to the Pi-hosted agent through Athena's
+fallback handler. The agent uses the configured cloud model to select HA and
+Windows MCP tools. The old Adapt language grammar is not in the normal pipeline.
+`athena.context.request` marks submission and `athena.action.result` carries the
+agent response or failure, preserving OVOS session context. Neither event alone
+proves that an external device action completed.
 
-Requests that need context can reach `athena.context.request` on the message bus.
-The contextual reasoning and MCP consumer is a future component; this version
-does not execute a contextual fallback or send unmatched speech to a cloud LLM.
+A single worker serializes requests. It does not block the OVOS callback while
+waiting for the model or tools. Full queues produce busy feedback. Shutdown
+cancels the current turn, drops queued work and closes owned connections; remote
+actions already accepted cannot be undone by cancelling the local request.
+See [agent setup](../docs/AGENT_SETUP.md) for configuration, screenshot support,
+limits and uncertainty handling.
 
 ## Testing
 
@@ -246,12 +253,12 @@ For a live check, start voice mode and try:
 2. `Athena, turn on nanoleafs` and confirm the Home Assistant action.
 3. Say `Athena` without a command and wait for the speech timeout.
 4. Speak ordinary sentences without the wake word and check for false activation.
-5. Try an unsupported request and check that no device action executes.
+5. Try an ambiguous request and check that the model asks for clarification.
 6. Stop Athena during listening with Ctrl-C and confirm its processes exit.
 
 Once command delivery works, save your PC work before saying `Athena, sleep PC`.
-The desktop client acknowledges the request before applying the power action;
-an acknowledgment does not confirm that Windows finished sleeping.
+Check the specific tool result: acceptance of a power request does not confirm
+that Windows finished sleeping.
 
 References: [OVOS listener](https://github.com/OpenVoiceOS/ovos-dinkum-listener),
 [Precise ONNX plugin](https://github.com/OpenVoiceOS/ovos-ww-plugin-precise-onnx),
