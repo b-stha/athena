@@ -67,6 +67,12 @@ history. The acceptance criteria and implementation sequence are in the
 [development plan](docs/DEVELOPMENT_PLAN.md). These are planned changes; normal
 runtime requests still use the existing cloud agent until that work is delivered.
 
+The first [command-planning preview](docs/COMMAND_PLANNING.md) is implemented:
+`python -m athena_agent.planning 'turn on bedroom lights and open my most recent project'`.
+It exposes typed local candidates and unresolved contextual clauses with source
+spans and ordering dependencies. It performs no execution or cloud calls; hybrid
+runtime dispatch and the outcome ledger remain the next integration slice.
+
 ## Planned local and contextual boundary
 
 The unit of routing should be an **action or clause**, rather than the whole
