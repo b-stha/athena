@@ -64,13 +64,24 @@ def main():
     modes.add_argument("--text", action="store_true", help="type requests for the same agent used by voice")
     modes.add_argument("--legacy-text", action="store_true", help="diagnose the retired deterministic REST backends")
     modes.add_argument("--check-agent-config", action="store_true", help="validate model/MCP settings without connecting")
-    parser.add_argument("--model", type=Path, help="use a different Precise Athena ONNX model")
+    parser.add_argument("--wake-engine", choices=("custom", "precise"),
+                        default=os.getenv("ATHENA_WAKE_ENGINE", "custom"),
+                        help="wake detector (default: custom trained openWakeWord model)")
+    parser.add_argument("--model", type=Path, help="ONNX classifier for the selected wake detector")
+    parser.add_argument("--melspec-model", type=Path, help="custom openWakeWord mel-spectrogram ONNX model")
+    parser.add_argument("--embedding-model", type=Path, help="custom openWakeWord embedding ONNX model")
+    parser.add_argument("--wake-threshold", type=float, default=os.getenv("ATHENA_WAKE_THRESHOLD", "0.98"),
+                        help="custom model activation threshold (default: 0.98)")
+    parser.add_argument("--wake-consecutive", type=int, default=os.getenv("ATHENA_WAKE_CONSECUTIVE", "1"),
+                        help="required consecutive fresh custom model scores (default: 1)")
+    parser.add_argument("--wake-cooldown", type=float, default=os.getenv("ATHENA_WAKE_COOLDOWN", "2"),
+                        help="custom wake cooldown in seconds of captured audio (default: 2)")
     parser.add_argument("--mic-device", default="reSpeaker Flex XVF3800", help="PortAudio microphone name")
     parser.add_argument("--bus-port", type=int, default=8181, help="local OVOS bus port")
     parser.add_argument("--wake-sensitivity", type=float, default=0.5,
-                        help="wake sensitivity from 0 to 1; lower is stricter (default: 0.5)")
+                        help="legacy Precise sensitivity from 0 to 1; lower is stricter (default: 0.5)")
     parser.add_argument("--wake-trigger-level", type=int, default=3,
-                        help="wake activation count; higher requires more evidence (default: 3)")
+                        help="legacy Precise activation count; higher requires more evidence (default: 3)")
     parser.add_argument("--wake-diagnostics", action="store_true",
                         help="log wake model scores and microphone levels for troubleshooting")
     parser.add_argument("--stt-timeout", type=float, default=30,
@@ -98,11 +109,18 @@ def main():
             root, args.model, device=args.mic_device, bus_port=args.bus_port,
             wake_sensitivity=args.wake_sensitivity, wake_trigger_level=args.wake_trigger_level,
             stt_timeout=args.stt_timeout, wake_diagnostics=args.wake_diagnostics,
+            wake_engine=args.wake_engine, melspec_model=args.melspec_model,
+            embedding_model=args.embedding_model, wake_threshold=args.wake_threshold,
+            wake_consecutive=args.wake_consecutive, wake_cooldown=args.wake_cooldown,
         )
         os.environ.update(env)
-        check_plugins()
-        print(f"Wake settings: sensitivity {args.wake_sensitivity:g}, "
-              f"trigger level {args.wake_trigger_level}.", flush=True)
+        check_plugins(config["hotwords"]["athena"]["module"])
+        if args.wake_engine == "custom":
+            print(f"Custom wake settings: threshold {args.wake_threshold:g}, "
+                  f"consecutive {args.wake_consecutive}, cooldown {args.wake_cooldown:g}s.", flush=True)
+        else:
+            print(f"Precise wake settings: sensitivity {args.wake_sensitivity:g}, "
+                  f"trigger level {args.wake_trigger_level}.", flush=True)
         print(f"Transcription timeout: {args.stt_timeout:g} seconds.", flush=True)
         if args.check_config:
             from ovos_plugin_manager.microphone import OVOSMicrophoneFactory

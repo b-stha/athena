@@ -1,12 +1,13 @@
 # Athena
 
-Athena is a Raspberry Pi 5 voice assistant. OVOS captures and transcribes speech
-using the existing reSpeaker, wake/VAD and local Whisper/Wyoming layers. Every
+Athena is a Raspberry Pi 5 voice assistant. Its trained openWakeWord model detects
+Athena or Hey Athena; OVOS handles reSpeaker capture, VAD and recording, with local
+Whisper/Wyoming transcription. Every
 completed transcript now goes to a Pi-hosted agent that uses a configurable
 cloud model and two independent MCP backends.
 
 ```text
-reSpeaker -> OVOS wake + recording -> local Whisper -> Athena agent on Pi
+reSpeaker -> custom wake + OVOS recording -> local Whisper -> Athena agent on Pi
                                                          |
                                  cloud model API <-------+-- MCP -> Home Assistant
                                                          +-- MCP -> Windows-MCP on PC
@@ -30,14 +31,16 @@ On the Pi:
 ```bash
 sudo apt-get install python3-venv libportaudio2
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt -r requirements-agent.txt
-.venv/bin/python -m pip install -e '.[agent]'
-.venv/bin/python -m athena_ovos.setup
+.venv/bin/python -m pip install -r requirements.txt -r requirements-agent.txt -r voice/requirements-wake.txt
+.venv/bin/python -m pip install -e '.[agent,wake]'
 ```
 
 Merge `.env.example` into your ignored `.env` and copy `agent.example.json` to
 ignored `agent.local.json`, replacing example URLs/settings locally. Keep the
 existing Wyoming Whisper service running (default `tcp://127.0.0.1:10300`).
+Set the three `ATHENA_WAKE_*MODEL` paths to the trained classifier and matching
+feature assets. See the [selected custom model](docs/VOICE_MODEL.md). The normal
+launcher requires these assets; it does not select a Precise model if they are missing.
 
 ```bash
 ./run.sh --check-agent-config  # settings only, no network or tool calls
@@ -69,11 +72,11 @@ responses currently appear in the terminal and OVOS speak events.
 
 ## Voice and unfinished evaluation
 
-The microphone, VAD, wake and transcription implementations are retained. The
-current normal launcher uses the existing single-word **Athena** Precise ONNX
-model. Custom **hey athena** openWakeWord collection/training/evaluation remains
-opt-in; hardware accuracy testing is intentionally deferred until after this
-architecture migration.
+The normal launcher uses the trained dual-form **Athena / Hey Athena** openWakeWord
+classifier. The older community Precise model requires explicit `--wake-engine
+precise` selection. Collection/training/evaluation sources and external artifacts
+are preserved. The selected candidate is tuned on development validation;
+fresh room/voice accuracy testing remains unfinished.
 
 See [voice setup](voice/README.md), [wake evaluation](voice/WAKE_EVALUATION.md),
 [training](voice/TRAINING.md), and [current training setup](voice/TRAINING_SETUP.md).

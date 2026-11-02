@@ -11,6 +11,8 @@ dynamic = ["dependencies"]
 
 [project.optional-dependencies]
 agent = ["mcp==1.26.0", "httpx>=0.28,<0.29", "jsonschema>=4.23,<5"]
+wake = ["openwakeword==0.6.0", "numpy==1.26.4", "onnxruntime==1.20.1",
+        "tflite-runtime==2.14.0; platform_system == 'Linux'"]
 
 [project.entry-points."opm.skill"]
 athena-skill = "athena_skill:AthenaSkill"
@@ -28,6 +30,7 @@ athena-webrtcvad = "ovos_vad_plugin_webrtcvad:WebRTCVAD"
 # Precise ONNX 0.1.0 advertises the old mycroft.plugin.wake_word group.
 [project.entry-points."opm.wake_word"]
 athena-precise-onnx = "athena_ovos.wake:AthenaPreciseWakeWord"
+athena-openwakeword = "athena_ovos.custom_wake:AthenaOpenWakeWord"
 
 [tool.setuptools]
 py-modules = ["router"]

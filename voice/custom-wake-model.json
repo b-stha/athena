@@ -1,0 +1,30 @@
+{
+  "id": "causal-positive-20261031",
+  "framework": "openwakeword-0.6.0-onnx",
+  "phrases": ["Athena", "Hey Athena"],
+  "sample_rate": 16000,
+  "source_channel_zero_based": 1,
+  "threshold": 0.98,
+  "consecutive": 1,
+  "cooldown_seconds": 2,
+  "assets": {
+    "hey_athena.onnx": "164734b986d894d4014b736e750a6760d65a8449e46ca0096480561d5bfb0caf",
+    "melspectrogram.onnx": "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f",
+    "embedding_model.onnx": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f"
+  },
+  "development_validation": {
+    "session": "desk-validation-01",
+    "positive_clips_detected": 26,
+    "positive_clips_total": 28,
+    "athena_clips_detected": 8,
+    "athena_clips_total": 10,
+    "hey_athena_clips_detected": 10,
+    "hey_athena_clips_total": 10,
+    "immediate_command_clips_detected": 8,
+    "immediate_command_clips_total": 8,
+    "false_events": 1,
+    "negative_seconds": 111,
+    "threshold_tuned_on_this_session": true,
+    "fresh_final_test_complete": false
+  }
+}
