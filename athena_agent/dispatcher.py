@@ -4,11 +4,13 @@ import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass
 import os
+import time
 
 from router import Action
 
 from .local_ha import DirectHA, HARejected, LocalHAConfig
 from .planning import plan_command
+from .routing import RouteEvent, emit_route_event, route_reason
 
 
 def cloud_agent():
@@ -32,7 +34,7 @@ class RequestDispatcher:
     Reusing a request ID within the retained ledger returns its original result.
     New user turns receive new IDs. This is not cross-restart idempotency.
     """
-    def __init__(self, *, agent_factory=None, local_factory=None, local_enabled=None):
+    def __init__(self, *, agent_factory=None, local_factory=None, local_enabled=None, event_sink=None):
         if local_enabled is None:
             setting = os.getenv('ATHENA_LOCAL_HA_ENABLED', 'false').strip().casefold()
             if setting not in {'true', 'false'}:
@@ -47,6 +49,8 @@ class RequestDispatcher:
         self.ledger = OrderedDict()
         self.pending_context = OrderedDict()
         self.lock = asyncio.Lock()
+        self.event_sink = emit_route_event if event_sink is None else event_sink
+        self.last_route_event = None
 
     async def close(self):
         try:
@@ -73,59 +77,100 @@ class RequestDispatcher:
 
     async def turn(self, text, session_id='default', *, request_id=None):
         async with self.lock:
+            started = time.monotonic()
             plan = plan_command(text, request_id=request_id)
             session_id = str(session_id)[:128]
-            key = (session_id, plan.request_id)
-            if key in self.ledger:
-                record = self.ledger[key]
-                if record.text != text:
-                    return 'That request ID was already used for a different command. No new action sent.'
-                return record.reply
-            step = plan.steps[0]
-            if step.route == 'clarify':
-                return 'Please say a command.'
-            if (self.local_enabled and len(plan.steps) == 1 and step.route == 'local'
-                    and step.action.backend == 'home_assistant'):
-                record = ExecutionRecord(text, step.action)
-                self.ledger[key] = record
-                while len(self.ledger) > 128:
-                    self.ledger.popitem(last=False)
+            route, reason = route_reason(plan, self.local_enabled)
+            trace = {'request_id': plan.request_id, 'route': route, 'reason': reason,
+                     'outcome': 'pending', 'step_count': len(plan.steps),
+                     'model_request_attempts': 0, 'local_action_attempts': 0}
+            try:
+                return await self._dispatch(text, session_id, plan, trace)
+            except asyncio.CancelledError:
+                if trace['outcome'] == 'pending':
+                    trace['outcome'] = 'cancelled'
+                raise
+            except Exception:
+                trace['outcome'] = 'error'
+                raise
+            finally:
+                event = RouteEvent(**trace, elapsed_ms=round((time.monotonic() - started) * 1000, 3))
+                self.last_route_event = event
                 try:
-                    if self.local is None:
-                        self.local = self.local_factory()
-                except (ValueError, OSError):
-                    record.reply = 'Local Home Assistant configuration is missing or invalid. No action sent.'
+                    self.event_sink(event)
+                except Exception:
+                    # A diagnostics failure must not change an already dispatched
+                    # action's result or encourage the caller to repeat it.
+                    pass
+
+    async def _dispatch(self, text, session_id, plan, trace):
+        key = (session_id, plan.request_id)
+        if key in self.ledger:
+            record = self.ledger[key]
+            if record.text != text:
+                trace.update(route='blocked', reason='request_id_conflict', outcome='rejected')
+                return 'That request ID was already used for a different command. No new action sent.'
+            trace.update(route='replay', reason='retained_request_result', outcome=record.status)
+            return record.reply
+        step = plan.steps[0]
+        if step.route == 'clarify':
+            trace['outcome'] = 'clarification'
+            return 'Please say a command.'
+        if (self.local_enabled and len(plan.steps) == 1 and step.route == 'local'
+                and step.action.backend == 'home_assistant'):
+            record = ExecutionRecord(text, step.action)
+            self.ledger[key] = record
+            while len(self.ledger) > 128:
+                self.ledger.popitem(last=False)
+            try:
+                if self.local is None:
+                    self.local = self.local_factory()
+            except (ValueError, OSError):
+                record.reply = 'Local Home Assistant configuration is missing or invalid. No action sent.'
+            else:
+                record.status = 'dispatched'
+                try:
+                    trace['local_action_attempts'] += 1
+                    await self.local.execute(step.action)
+                except HARejected:
+                    record.status = 'rejected'
+                    record.reply = 'Home Assistant rejected the request. It was not retried.'
+                except asyncio.CancelledError:
+                    record.status = 'unknown'
+                    trace['outcome'] = 'unknown'
+                    record.reply = 'Home Assistant request was interrupted. Outcome is unknown; it was not retried.'
+                    self._remember(text, record, session_id)
+                    raise
+                except Exception:
+                    record.status = 'unknown'
+                    record.reply = 'Home Assistant outcome is unknown. It was not retried.'
                 else:
-                    record.status = 'dispatched'
-                    try:
-                        await self.local.execute(step.action)
-                    except HARejected:
-                        record.status = 'rejected'
-                        record.reply = 'Home Assistant rejected the request. It was not retried.'
-                    except asyncio.CancelledError:
-                        record.status = 'unknown'
-                        record.reply = 'Home Assistant request was interrupted. Outcome is unknown; it was not retried.'
-                        self._remember(text, record, session_id)
-                        raise
-                    except Exception:
-                        record.status = 'unknown'
-                        record.reply = 'Home Assistant outcome is unknown. It was not retried.'
-                    else:
-                        record.status = 'accepted'
-                        target = step.action.target.removeprefix('light.').replace('_', ' ')
-                        state = 'on' if step.action.action == 'turn_on' else 'off'
-                        record.reply = f'Requested {target} lights {state}.'
-                self._remember(text, record, session_id)
-                return record.reply
-            # Preserve the complete request. Mixed clauses and PC actions are
-            # never partially executed by this first integration slice.
-            if self.agent is None:
-                try:
-                    self.agent = self.agent_factory()
-                except (ValueError, OSError):
-                    return 'Contextual routing is unavailable. Check model/MCP configuration. No action sent.'
-                for previous_session, turns in self.pending_context.items():
-                    for previous_text, result in turns:
-                        self.agent.remember_local_turn(previous_text, result, session_id=previous_session)
-                self.pending_context.clear()
-            return await self.agent.turn(text, session_id=session_id)
+                    record.status = 'accepted'
+                    target = step.action.target.removeprefix('light.').replace('_', ' ')
+                    state = 'on' if step.action.action == 'turn_on' else 'off'
+                    record.reply = f'Requested {target} lights {state}.'
+            self._remember(text, record, session_id)
+            trace['outcome'] = record.status
+            return record.reply
+        # Preserve the complete request. Mixed clauses and PC actions are
+        # never partially executed by this first integration slice.
+        if self.agent is None:
+            try:
+                self.agent = self.agent_factory()
+            except (ValueError, OSError):
+                trace['outcome'] = 'configuration_unavailable'
+                return 'Contextual routing is unavailable. Check model/MCP configuration. No action sent.'
+            for previous_session, turns in self.pending_context.items():
+                for previous_text, result in turns:
+                    self.agent.remember_local_turn(previous_text, result, session_id=previous_session)
+            self.pending_context.clear()
+        before = getattr(self.agent, 'model_request_attempts', None)
+        trace['model_request_attempts'] = None
+        try:
+            result = await self.agent.turn(text, session_id=session_id)
+            trace['outcome'] = 'returned'
+            return result
+        finally:
+            after = getattr(self.agent, 'model_request_attempts', None)
+            if type(before) is int and type(after) is int and after >= before:
+                trace['model_request_attempts'] = after - before

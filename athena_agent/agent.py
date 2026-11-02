@@ -30,6 +30,7 @@ class Agent:
         self.model = model or CloudModel(config)
         self.registry_factory = registry_factory
         self.history = OrderedDict()
+        self.model_request_attempts = 0
 
     async def close(self):
         await self.model.close()
@@ -102,6 +103,7 @@ class Agent:
     async def _iterate(self, prefix, current, tools, registry, wake_enabled):
         total, images_used, used_ids = 0, 0, set()
         for _ in range(self.config.max_rounds):
+            self.model_request_attempts += 1
             message = await self.model.complete(prefix + current, tools)
             content = message.get("content")
             # Gemini can attach an opaque thought signature to the assistant

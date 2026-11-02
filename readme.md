@@ -77,6 +77,12 @@ spans and ordering dependencies. The preview itself executes nothing. The first
 opt-in runtime integration handles single HA actions and records outcomes;
 scope-aware mixed execution remains outstanding. See the linked testing steps.
 
+Opt-in route diagnostics (`ATHENA_ROUTE_LOG=true`) now identify local/cloud/
+clarification decisions, reasons, outcomes and model-attempt counts without
+logging transcript content. The [43-case routing baseline](docs/ROUTING_BASELINE_20261102.md)
+records current coverage and development gaps using fake backends, with no
+device effects or paid model calls. Routing rules are unchanged by that benchmark.
+
 ## Planned local and contextual boundary
 
 The unit of routing should be an **action or clause**, rather than the whole
