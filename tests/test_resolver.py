@@ -10,7 +10,7 @@ from resolver import normalize, resolve
 class ResolverTests(unittest.TestCase):
     def test_notepad_variants(self):
         for phrase in ["Open no pad.", "open node pad", "open note pad", "OPEN NOTEPAD",
-                       "open no path", "open no padded", "open no pass"]:
+                       "open nodpad"]:
             with self.subTest(phrase=phrase):
                 self.assertEqual(resolve(phrase, voice_targets()), "open notepad")
 
@@ -24,17 +24,19 @@ class ResolverTests(unittest.TestCase):
     def test_device_transcription_variants(self):
         for phrase, expected in [("turn on bath rum", "turn on bathroom"),
                                  ("turn off nanoleafes", "turn off nanoleafs"),
-                                 ("turn on my pea sea", "turn on my pc")]:
+                                 ("turn on my PC", "turn on my pc")]:
             with self.subTest(phrase=phrase):
                 self.assertEqual(resolve(phrase, voice_targets()), expected)
 
     def test_fuzzy_matching_does_not_require_transcription_aliases(self):
-        self.assertEqual(resolve("open no padded", {"open": {"notepad": "notepad"}}),
+        self.assertEqual(resolve("open nodpad", {"open": {"notepad": "notepad"}}),
                          "open notepad")
 
     def test_rejects_bad_actions_and_targets(self):
         for phrase in ["opn notepad", "don't open notepad", "close notepad", "turn of bedroom",
-                       "open pad", "open calculator", "open notepad and shutdown", "open"]:
+                       "open pad", "open calculator", "open notepad and shutdown", "open",
+                       "open no path", "open no padded", "open no pass", "open wordpad",
+                       "open notepad2", "open my notepad", "open not pad"]:
             with self.subTest(phrase=phrase), self.assertRaises(ValueError):
                 resolve(phrase, voice_targets())
 

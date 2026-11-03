@@ -6,7 +6,9 @@ import json
 import re
 from uuid import uuid4
 
-from router import Action, UnknownCommand, is_explicit_light_request, normalize_command, parse_action
+from router import (Action, UnknownCommand, application_scope_view, is_explicit_light_request,
+                    normalize_command, parse_action, parse_fuzzy_action)
+from resolver import AmbiguousTarget
 
 
 @dataclass(frozen=True)
@@ -94,7 +96,7 @@ def plan_command(text, *, request_id=None):
     body = text[start:end]
     if not normalize_command(body):
         return whole('clarify', 'empty_or_wake_only')
-    reason = _scope_reason(body)
+    reason = _scope_reason(application_scope_view(body))
     if reason:
         return whole('contextual', reason)
 
@@ -117,8 +119,15 @@ def plan_command(text, *, request_id=None):
             action = parse_action(source)
             route, reason = 'local', 'complete_registered_command'
         except UnknownCommand:
-            action = None
-            route, reason = 'contextual', 'unresolved_command_or_target'
+            try:
+                action = parse_fuzzy_action(source)
+                route, reason = 'local', 'fuzzy_registered_target'
+            except AmbiguousTarget:
+                action = None
+                route, reason = 'clarify', 'ambiguous_registered_target'
+            except UnknownCommand:
+                action = None
+                route, reason = 'contextual', 'unresolved_command_or_target'
         dependencies = (steps[-1].step_id,) if steps and connector in {'then', 'and then'} else ()
         steps.append(PlanStep(f'{request_id}:{index}', left, right, source, route, reason,
                               action, connector, dependencies))

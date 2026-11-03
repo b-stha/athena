@@ -69,7 +69,11 @@ class CommandTemplate:
 
     @property
     def pattern(self):
-        target = rf"(?P<{self.target_slot}>{_alternatives(TARGET_VOCABULARY[self.target_kind])})"
+        return self.build_pattern()
+
+    def build_pattern(self, *, fuzzy=False):
+        vocabulary = r'[a-z]+(?: [a-z]+){0,2}?' if fuzzy else _alternatives(TARGET_VOCABULARY[self.target_kind])
+        target = rf"(?P<{self.target_slot}>{vocabulary})"
         prefix = r"(?:please )?"
         if self.target_kind == "Desktop":
             target = r"(?:(?:my|the) )?" + target
@@ -82,11 +86,13 @@ class CommandTemplate:
         # negation, conditionals and extra commands cannot execute.
         return rf"^{prefix}{verb}{target}{self.suffix}(?: please)?$"
 
-    def match(self, command):
-        match = re.fullmatch(self.pattern, command)
+    def match(self, command, *, target_resolver=None):
+        match = re.fullmatch(self.build_pattern(fuzzy=target_resolver is not None), command)
         if match is None:
             return None
         spoken_target = match.group(self.target_slot)
+        if target_resolver is not None:
+            spoken_target = target_resolver(spoken_target, TARGET_VOCABULARY[self.target_kind])
         if self.target_kind == "Desktop":
             return Action("desktop", self.action, DESKTOP_TARGETS[spoken_target], "device")
         if self.target_kind == "Application":
@@ -132,6 +138,44 @@ def parse_action(command):
     if len(matches) != 1:
         raise UnknownCommand("Unknown or ambiguous command. Try: turn on nanoleafs or open notepad")
     return matches.pop()
+
+
+def application_scope_view(command):
+    """Exempt only the known app-slot mishearing 'no pad' from the 'no' guard.
+
+    Original text/spans are retained. This does not remove negation generally.
+    """
+    view = ' '.join(command.casefold().split())
+    match = re.fullmatch(r'((?:please )?(?:open|launch|start) )no pad((?: please)?[.!]?)', view)
+    if match and APPLICATIONS.get('notepad') == 'notepad':
+        return match[1] + 'notepad' + match[2]
+    return command
+
+
+def parse_fuzzy_action(command):
+    """Reuse exact command templates with bounded target-only corrections."""
+    from resolver import AmbiguousTarget, resolve_target
+    normalized = normalize_command(command)
+    if '?' in command:
+        raise UnknownCommand('Resolve question scope before correcting a target.')
+    matches, ambiguous = set(), False
+    for template in COMMAND_TEMPLATES:
+        if template.target_kind not in {'Light', 'Application'} or not template.verb:
+            continue
+        try:
+            action = template.match(normalized, target_resolver=resolve_target)
+        except AmbiguousTarget:
+            ambiguous = True
+            continue
+        except ValueError:
+            continue
+        if action is not None:
+            matches.add(action)
+    if len(matches) == 1 and not ambiguous:
+        return validate_action(matches.pop())
+    if ambiguous or len(matches) > 1:
+        raise AmbiguousTarget('Please repeat the full target name.')
+    raise UnknownCommand('No unambiguous registered fuzzy target.')
 
 
 def validate_action(action):

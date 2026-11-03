@@ -33,7 +33,7 @@ athena-precise-onnx = "athena_ovos.wake:AthenaPreciseWakeWord"
 athena-openwakeword = "athena_ovos.custom_wake:AthenaOpenWakeWord"
 
 [tool.setuptools]
-py-modules = ["router"]
+py-modules = ["router", "resolver"]
 
 [tool.setuptools.packages.find]
 include = ["athena_ovos*", "athena_skill*", "athena_wake*", "athena_agent*", "integrations*"]

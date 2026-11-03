@@ -3,7 +3,7 @@
 Athena is a Raspberry Pi 5 voice assistant. Its trained openWakeWord model detects
 Athena or Hey Athena; OVOS handles reSpeaker capture, VAD and recording, with local
 Whisper/Wyoming transcription. Completed transcripts reach a Pi-hosted dispatcher.
-An opt-in route handles registered HA light commands locally; other requests use
+Opt-in routes handle registered HA lights and Notepad locally; other requests use
 a configurable cloud model and two independent MCP backends.
 
 ```text
@@ -29,7 +29,7 @@ Existing voice training/testing work has been committed and integrated.
 
 | Area | Current behavior | Remaining work |
 | --- | --- | --- |
-| Understanding | Voice/text share a dispatcher: opt-in single HA commands locally, other requests through the cloud agent. | Add scope-aware mixed execution and broader routine coverage. |
+| Understanding | Voice/text share a dispatcher: opt-in single HA/Notepad commands locally, other requests through the cloud agent. | Add scope-aware mixed execution and broader routine coverage. |
 | Device access | HA MCP, Windows-MCP and Pi-native Wake-on-LAN are connected. | Share typed actions between rules, local parsing and model-selected plans. |
 | Cost | Direct local commands use no model requests; cloud turns can invoke the model repeatedly with the full catalog. | Record actual usage, select relevant tools and remove unnecessary model rounds. |
 | Voice | Custom Athena/Hey Athena openWakeWord, OVOS capture/VAD and local Whisper. Spoken clock queries succeeded. | Improve quiet/distant recognition, false activations, transcription and command handoff. |
@@ -44,7 +44,9 @@ one user command can consume multiple model requests.
 The closed command grammar also feeds an opt-in local dispatcher. With
 `ATHENA_LOCAL_HA_ENABLED=true`, one complete registered HA light on/off command
 uses direct REST and a local acknowledgment, without cloud credentials or MCP.
-The default flag is false; other requests use the cloud agent. `--legacy-text`
+`ATHENA_LOCAL_APPS_ENABLED=true` independently permits registered Notepad launches
+through Windows MCP without model calls. Both flags default to false. Other
+requests use the cloud agent. `--legacy-text`
 still selects the older diagnostic route, including its legacy Desktop transport.
 
 ## Active development priorities
@@ -86,6 +88,10 @@ The [phrasing follow-up](docs/LIGHT_PHRASING_20261102.md) now resolves all six
 ordinary light-command misses locally, reducing cloud routes from 30 to 24 on
 the same authored 43-case suite. This is development coverage, not measured
 real-world usage or billing savings.
+The [bounded target resolver](docs/FUZZY_TARGETS.md) reuses the earlier RapidFuzz
+work with stricter edit/ambiguity thresholds. Recognized actions can correct
+registered target names; an independent opt-in enables deterministic Notepad
+launch through Windows MCP without model calls. See the linked testing flags.
 
 ## Planned local and contextual boundary
 
