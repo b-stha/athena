@@ -82,6 +82,10 @@ clarification decisions, reasons, outcomes and model-attempt counts without
 logging transcript content. The [43-case routing baseline](docs/ROUTING_BASELINE_20261102.md)
 records current coverage and development gaps using fake backends, with no
 device effects or paid model calls. Routing rules are unchanged by that benchmark.
+The [phrasing follow-up](docs/LIGHT_PHRASING_20261102.md) now resolves all six
+ordinary light-command misses locally, reducing cloud routes from 30 to 24 on
+the same authored 43-case suite. This is development coverage, not measured
+real-world usage or billing savings.
 
 ## Planned local and contextual boundary
 

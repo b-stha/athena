@@ -70,12 +70,17 @@ class CommandTemplate:
     @property
     def pattern(self):
         target = rf"(?P<{self.target_slot}>{_alternatives(TARGET_VOCABULARY[self.target_kind])})"
+        prefix = r"(?:please )?"
         if self.target_kind == "Desktop":
             target = r"(?:(?:my|the) )?" + target
-        verb = rf"(?P<{self.verb_slot}>{self.verb})"
+        elif self.target_kind == "Light":
+            target = r"(?:the )?" + target
+            if self.verb:
+                prefix += r"(?:(?:can|could|would) you (?:please )?)?"
+        verb = rf"(?P<{self.verb_slot}>{self.verb}) " if self.verb else ""
         # Full sentence validation supplements Adapt's keyword matching:
-        # negation, questions, conditionals and extra commands cannot execute.
-        return rf"^(?:please )?{verb} {target}{self.suffix}(?: please)?$"
+        # negation, conditionals and extra commands cannot execute.
+        return rf"^{prefix}{verb}{target}{self.suffix}(?: please)?$"
 
     def match(self, command):
         match = re.fullmatch(self.pattern, command)
@@ -99,12 +104,30 @@ COMMAND_TEMPLATES = (
     CommandTemplate("PutDesktopToSleep", "desktop", "sleep", "Desktop", r"put|send", " to sleep"),
     CommandTemplate("TurnOnLight", "home_assistant", "turn_on", "Light", r"turn on|switch on"),
     CommandTemplate("TurnOffLight", "home_assistant", "turn_off", "Light", r"turn off|switch off"),
+    CommandTemplate("TurnLightOn", "home_assistant", "turn_on", "Light", r"turn|switch", " on"),
+    CommandTemplate("TurnLightOff", "home_assistant", "turn_off", "Light", r"turn|switch", " off"),
+    CommandTemplate("LightOn", "home_assistant", "turn_on", "Light", "", " on"),
+    CommandTemplate("LightOff", "home_assistant", "turn_off", "Light", "", " off"),
 )
+
+
+def is_explicit_light_request(command):
+    """Recognize a complete light request with an action verb, without I/O.
+
+    Used only to distinguish terminal request punctuation from a state question.
+    Bare target/state forms such as 'bathroom lights off?' remain ambiguous.
+    """
+    normalized = normalize_command(command)
+    return any(template.target_kind == "Light" and template.verb
+               and template.match(normalized) is not None for template in COMMAND_TEMPLATES)
 
 
 def parse_action(command):
     """Recognize a complete command without performing any I/O."""
     normalized = normalize_command(command)
+    if '?' in command and not (command.count('?') == 1 and command.rstrip().endswith('?')
+                               and is_explicit_light_request(command)):
+        raise UnknownCommand("A question must be resolved before choosing an action.")
     matches = {action for template in COMMAND_TEMPLATES if (action := template.match(normalized)) is not None}
     if len(matches) != 1:
         raise UnknownCommand("Unknown or ambiguous command. Try: turn on nanoleafs or open notepad")

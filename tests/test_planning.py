@@ -67,7 +67,7 @@ class PlanningTests(unittest.TestCase):
             'turn on bedroom lights and turn it off',
             'turn on bedroom lights and open "turn off bathroom"',
             'turn on bedroom lights. Open notepad',
-            'turn on bedroom lights?',
+            'are bedroom lights on?',
             'turn on bedroom lights and stop',
         ]
         for text in cases:

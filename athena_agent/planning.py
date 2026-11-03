@@ -6,7 +6,7 @@ import json
 import re
 from uuid import uuid4
 
-from router import Action, UnknownCommand, normalize_command, parse_action
+from router import Action, UnknownCommand, is_explicit_light_request, normalize_command, parse_action
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,10 @@ def _scope_reason(text):
             return reason
     if re.search(r'["\u201c\u201d()\[\]]', text) or re.search(r"(?<!\w)'|'(?!\w)", text):
         return 'quoted_or_nested_scope'
-    if '?' in text or re.search(r'[.!]\s+\S', text):
+    if re.search(r'[.!]\s+\S', text):
+        return 'question_or_sentence_scope'
+    if '?' in text and not (text.count('?') == 1 and text.rstrip().endswith('?')
+                            and is_explicit_light_request(text)):
         return 'question_or_sentence_scope'
     return None
 
