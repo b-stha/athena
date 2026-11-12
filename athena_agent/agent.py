@@ -2,6 +2,8 @@
 
 from collections import OrderedDict
 from copy import deepcopy
+from dataclasses import dataclass, replace
+import asyncio
 import json
 import os
 
@@ -24,6 +26,27 @@ WAKE_DEFINITION = {"type": "function", "function": {
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}}
 
 
+@dataclass(frozen=True)
+class ToolExecutionRecord:
+    """Transport outcome, independent of the model's description of its work."""
+
+    call_id: str
+    name: str
+    status: str
+    result_excerpt: str = ""
+
+
+@dataclass(frozen=True)
+class TurnExecutionResult:
+    session_id: str
+    text: str
+    status: str
+    reply: str
+    tool_records: tuple[ToolExecutionRecord, ...]
+    model_request_attempts: int
+    error: str = ""
+
+
 class Agent:
     def __init__(self, config, *, model=None, registry_factory=ToolRegistry):
         self.config = config
@@ -31,6 +54,64 @@ class Agent:
         self.registry_factory = registry_factory
         self.history = OrderedDict()
         self.model_request_attempts = 0
+        self.last_execution = None
+        self._execution_results = OrderedDict()
+
+    def execution_result(self, session_id="default"):
+        """Return the latest immutable snapshot for one of eight retained sessions."""
+        return self._execution_results.get(str(session_id)[:128])
+
+    def _publish_execution(self, execution):
+        result = TurnExecutionResult(
+            execution["session_id"], execution["text"], execution["status"], execution["reply"],
+            tuple(execution["records"]), self.model_request_attempts - execution["model_start"],
+            execution["error"],
+        )
+        self.last_execution = result
+        self._execution_results.pop(result.session_id, None)
+        self._execution_results[result.session_id] = result
+        while len(self._execution_results) > 8:
+            self._execution_results.popitem(last=False)
+
+    @staticmethod
+    def _partial_reply(execution, reason):
+        """Describe recorded outcomes without inferring device state from prose."""
+        descriptions = {
+            "returned": "returned a response; completion is unverified",
+            "accepted": "accepted a wake packet; PC startup is unconfirmed",
+            "rejected": "was rejected before execution",
+            "unknown": "has an unknown outcome and was not retried",
+            "dispatched": "has an unknown outcome and was not retried",
+            "not_started": "was not executed",
+        }
+        records = execution["records"]
+        if not records:
+            return reason
+        outcomes = "; ".join(
+            f"{' '.join(record.name.split())}: {descriptions[record.status]}" for record in records
+        )
+        return f"Recorded tool outcomes: {outcomes}. {reason}"
+
+    def _interrupt_execution(self, execution, reason, status):
+        for index, record in enumerate(execution["records"]):
+            if record.status == "dispatched":
+                execution["records"][index] = replace(record, status="unknown", result_excerpt=reason)
+        execution["status"] = status
+        execution["error"] = reason
+        execution["reply"] = self._partial_reply(execution, reason)
+        self._publish_execution(execution)
+
+    def _remember_interrupted_execution(self, turns, execution):
+        if not execution["records"]:
+            return
+        # Preserve receipts for a later question without retaining an incomplete
+        # assistant tool batch or screenshot messages from the interrupted turn.
+        turns.append([{"role": "user", "content": execution["text"]},
+                      {"role": "assistant", "content": execution["reply"] +
+                       " This is a previous request, not a new instruction. Do not repeat it."}])
+        while turns and (len(turns) > self.config.history_turns
+                         or len(json.dumps(turns, ensure_ascii=False)) > self.config.history_chars):
+            turns.pop(0)
 
     async def close(self):
         await self.model.close()
@@ -48,10 +129,14 @@ class Agent:
             turns.pop(0)
 
     async def turn(self, text, session_id="default"):
+        self.last_execution = None
         if not isinstance(text, str) or not text.strip() or len(text) > 8000:
             raise ValueError("A command must contain between 1 and 8000 characters.")
         text = text.strip()
         session_id = str(session_id)[:128]
+        execution = {"session_id": session_id, "text": text, "status": "running", "reply": "",
+                     "records": [], "model_start": self.model_request_attempts, "error": ""}
+        self._publish_execution(execution)
         turns = self.history.pop(session_id, [])
         self.history[session_id] = turns
         while len(self.history) > 8:
@@ -68,9 +153,26 @@ class Agent:
                     tools.append(deepcopy(WAKE_DEFINITION))
                 unavailable = ", ".join(sorted(registry.unavailable)) or "none"
                 prefix[0]["content"] += f"\nCurrently unavailable MCP servers: {unavailable}."
-                reply = await self._iterate(prefix, current, tools, registry, wake_enabled)
+                reply = await self._iterate(prefix, current, tools, registry, wake_enabled, execution)
         except ModelError as error:
-            reply = str(error)
+            execution["status"] = "failed"
+            execution["error"] = str(error)[:512]
+            reply = self._partial_reply(execution, str(error))
+        except asyncio.CancelledError:
+            self._interrupt_execution(execution,
+                "Request interrupted. Remaining actions were not executed; dispatched outcomes must not be retried.",
+                "cancelled")
+            self._remember_interrupted_execution(turns, execution)
+            raise
+        except Exception:
+            self._interrupt_execution(execution,
+                "Agent execution failed unexpectedly. Remaining actions were not executed.", "failed")
+            self._remember_interrupted_execution(turns, execution)
+            raise
+        execution["reply"] = reply
+        if execution["status"] == "running":
+            execution["status"] = "returned"
+        self._publish_execution(execution)
         # Keep complete user turns only. Never retain images across turns.
         if not current or current[-1].get("role") != "assistant" or current[-1].get("tool_calls"):
             current.append({"role": "assistant", "content": reply})
@@ -100,10 +202,11 @@ class Agent:
                 return False
         return not pending
 
-    async def _iterate(self, prefix, current, tools, registry, wake_enabled):
+    async def _iterate(self, prefix, current, tools, registry, wake_enabled, execution):
         total, images_used, used_ids = 0, 0, set()
         for _ in range(self.config.max_rounds):
             self.model_request_attempts += 1
+            self._publish_execution(execution)
             message = await self.model.complete(prefix + current, tools)
             content = message.get("content")
             # Gemini can attach an opaque thought signature to the assistant
@@ -122,7 +225,9 @@ class Agent:
                 current.append({"role": "assistant", "content": reply, **metadata})
                 return reply
             if total + len(calls) > self.config.max_calls:
-                return "Stopped at the action limit. Remaining actions were not executed."
+                execution["status"] = "limit"
+                return self._partial_reply(execution,
+                    "Stopped at the action limit. Remaining actions were not executed.")
             parsed = []
             for call in calls:
                 try:
@@ -145,24 +250,52 @@ class Agent:
             for call_id, name, arguments in parsed:
                 total += 1
                 result = {"content": "Not executed because an earlier action has an unknown outcome.", "images": []}
-                if stopped is None:
+                if stopped is not None:
+                    execution["records"].append(ToolExecutionRecord(call_id, name[:128], "not_started", result["content"]))
+                    self._publish_execution(execution)
+                else:
+                    record_index = len(execution["records"])
+                    execution["records"].append(ToolExecutionRecord(call_id, name[:128], "dispatched"))
+                    self._publish_execution(execution)
+                    status = "returned"
                     try:
                         if name == "native__wake_pc":
                             if not wake_enabled or arguments:
                                 raise ToolError("Wake-on-LAN is unconfigured or arguments were invalid; no packet sent.")
-                            import asyncio
                             from integrations.desktop import wake_pc
                             await asyncio.to_thread(wake_pc)
                             result = {"content": "Wake packet sent. PC startup is not confirmed.", "images": []}
+                            status = "accepted"
                         else:
                             result = await registry.call(name, arguments)
+                            if (not isinstance(result, dict) or not isinstance(result.get("content"), str)
+                                    or not isinstance(result.get("images"), list)):
+                                raise ValueError("Invalid tool result")
+                            reported_status = result.get("execution_status", "returned")
+                            if reported_status not in {"returned", "unknown"}:
+                                raise ValueError("Invalid tool execution status")
+                            if reported_status == "unknown":
+                                status = "unknown"
+                                stopped = "The tool reported an execution error. Outcome is unknown; remaining actions were not executed."
                     except UncertainToolError as error:
+                        status = "unknown"
                         stopped = str(error)
                         result = {"content": stopped, "images": []}
                     except ToolError as error:
+                        status = "rejected"
                         result = {"content": str(error), "images": []}
                     except (OSError, ValueError):
-                        result = {"content": "Native action failed. Completion is not confirmed.", "images": []}
+                        status = "unknown"
+                        stopped = "Tool execution failed. Outcome is unknown; remaining actions were not executed."
+                        result = {"content": stopped, "images": []}
+                    except BaseException:
+                        execution["records"][record_index] = replace(execution["records"][record_index],
+                            status="unknown", result_excerpt="Execution was interrupted; outcome is unknown.")
+                        self._publish_execution(execution)
+                        raise
+                    execution["records"][record_index] = replace(execution["records"][record_index],
+                        status=status, result_excerpt=result["content"][:512])
+                    self._publish_execution(execution)
                 current.append({"role": "tool", "tool_call_id": call_id, "content": result["content"]})
                 images = result["images"][:max(0, self.config.max_images - images_used)]
                 if images:
@@ -175,5 +308,9 @@ class Agent:
             if image_messages:
                 current.append({"role": "user", "content": image_messages})
             if stopped is not None:
-                return stopped
-        return "Stopped at the reasoning limit. Remaining actions were not executed."
+                execution["status"] = "unknown"
+                execution["error"] = stopped[:512]
+                return self._partial_reply(execution, stopped)
+        execution["status"] = "limit"
+        return self._partial_reply(execution,
+            "Stopped at the reasoning limit. Remaining actions were not executed.")

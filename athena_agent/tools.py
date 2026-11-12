@@ -233,4 +233,5 @@ class ToolRegistry:
         content = "\n".join(text) or "Tool completed without textual content."
         if len(content) > self.config.max_result_chars:
             content = content[:self.config.max_result_chars] + "\n[Tool result truncated.]"
-        return {"content": content, "images": images}
+        return {"content": content, "images": images,
+                "execution_status": "unknown" if result.isError else "returned"}

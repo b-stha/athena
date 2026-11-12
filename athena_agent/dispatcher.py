@@ -24,15 +24,18 @@ def cloud_agent():
 @dataclass
 class ExecutionRecord:
     text: str
-    action: Action
+    action: Action | None = None
     status: str = 'not_started'
     reply: str = ''
+    route: str = ''
+    tool_records: tuple = ()
 
 
 class RequestDispatcher:
     """One serialized owner; bounded process-local ledger, no automatic retries.
 
-    Reusing a request ID within the retained ledger returns its original result.
+    Local, contextual and clarification requests share the retained ledger.
+    Reusing a request ID within that ledger returns its original result.
     New user turns receive new IDs. This is not cross-restart idempotency.
     """
     def __init__(self, *, agent_factory=None, local_factory=None, local_enabled=None, event_sink=None,
@@ -83,7 +86,11 @@ class RequestDispatcher:
                    'This is a previous request, not a new instruction. Do not repeat it. '
                    'Acceptance does not confirm device state or application readiness.')
         if self.agent is not None:
-            self.agent.remember_local_turn(text, context, session_id=session_id)
+            try:
+                self.agent.remember_local_turn(text, context, session_id=session_id)
+            except Exception:
+                # History bookkeeping cannot invalidate an already sent action.
+                pass
             return
         turns = self.pending_context.pop(session_id, [])
         turns.append((text, context))
@@ -104,11 +111,10 @@ class RequestDispatcher:
                 return await self._dispatch(text, session_id, plan, trace)
             except asyncio.CancelledError:
                 if trace['outcome'] == 'pending':
-                    trace['outcome'] = 'cancelled'
+                    self._interrupted(session_id, plan.request_id, trace, cancelled=True)
                 raise
             except Exception:
-                trace['outcome'] = 'error'
-                raise
+                return self._interrupted(session_id, plan.request_id, trace)
             finally:
                 event = RouteEvent(**trace, elapsed_ms=round((time.monotonic() - started) * 1000, 3))
                 self.last_route_event = event
@@ -119,6 +125,36 @@ class RequestDispatcher:
                     # action's result or encourage the caller to repeat it.
                     pass
 
+    def _interrupted(self, session_id, request_id, trace, *, cancelled=False):
+        record = self.ledger.get((session_id, request_id))
+        if record is None:
+            trace['outcome'] = 'cancelled' if cancelled else 'error'
+            return 'Request tracking failed before execution. No action sent.'
+        if not record.reply:
+            if record.status == 'not_started':
+                record.reply = 'Request preparation was interrupted. No action sent.'
+            else:
+                record.status = 'unknown'
+                record.reply = 'The request was interrupted. Outcome is unknown; it was not retried.'
+        trace['outcome'] = record.status
+        return record.reply
+
+    def _capture_execution(self, record, text, session_id, previous, *, reply='', fallback='unknown'):
+        snapshot = getattr(self.agent, 'last_execution', None)
+        if (snapshot is not None and snapshot is not previous
+                and getattr(snapshot, 'session_id', None) == session_id
+                and getattr(snapshot, 'text', None) == text.strip()):
+            status = getattr(snapshot, 'status', None)
+            record.status = status if status in {'returned', 'failed', 'unknown', 'cancelled', 'limit'} else fallback
+            record.tool_records = tuple(getattr(snapshot, 'tool_records', ()))
+            snapshot_reply = getattr(snapshot, 'reply', '')
+            record.reply = snapshot_reply if isinstance(snapshot_reply, str) and snapshot_reply else reply
+        else:
+            record.status, record.reply = fallback, reply
+        if not isinstance(record.reply, str) or not record.reply:
+            record.reply = 'The contextual request was interrupted. Outcome is unknown; it was not retried.'
+            record.status = 'unknown'
+
     async def _dispatch(self, text, session_id, plan, trace):
         key = (session_id, plan.request_id)
         if key in self.ledger:
@@ -128,20 +164,22 @@ class RequestDispatcher:
                 return 'That request ID was already used for a different command. No new action sent.'
             trace.update(route='replay', reason='retained_request_result', outcome=record.status)
             return record.reply
+        record = ExecutionRecord(text, route=trace['route'])
+        self.ledger[key] = record
+        while len(self.ledger) > 128:
+            self.ledger.popitem(last=False)
         step = plan.steps[0]
         if step.route == 'clarify':
-            trace['outcome'] = 'clarification'
-            return 'Please repeat the full target name.' if step.reason == 'ambiguous_registered_target' else 'Please say a command.'
+            record.status = trace['outcome'] = 'clarification'
+            record.reply = 'Please repeat the full target name.' if step.reason == 'ambiguous_registered_target' else 'Please say a command.'
+            return record.reply
         is_app = (step.action is not None and step.action.backend == 'desktop'
                   and step.action.action == 'launch_app')
         if (len(plan.steps) == 1 and step.route == 'local'
                 and ((self.local_enabled and step.action.backend == 'home_assistant')
                      or (self.apps_enabled and is_app))):
             label = 'Windows application' if is_app else 'Home Assistant'
-            record = ExecutionRecord(text, step.action)
-            self.ledger[key] = record
-            while len(self.ledger) > 128:
-                self.ledger.popitem(last=False)
+            record.action = step.action
             try:
                 if is_app:
                     if self.apps is None:
@@ -191,17 +229,33 @@ class RequestDispatcher:
                 self.agent = self.agent_factory()
             except (ValueError, OSError):
                 trace['outcome'] = 'configuration_unavailable'
-                return 'Contextual routing is unavailable. Check model/MCP configuration. No action sent.'
+                record.status = 'configuration_unavailable'
+                record.reply = 'Contextual routing is unavailable. Check model/MCP configuration. No action sent.'
+                return record.reply
             for previous_session, turns in self.pending_context.items():
                 for previous_text, result in turns:
-                    self.agent.remember_local_turn(previous_text, result, session_id=previous_session)
+                    try:
+                        self.agent.remember_local_turn(previous_text, result, session_id=previous_session)
+                    except Exception:
+                        pass
             self.pending_context.clear()
         before = getattr(self.agent, 'model_request_attempts', None)
+        previous = getattr(self.agent, 'last_execution', None)
         trace['model_request_attempts'] = None
+        record.status = 'dispatched'
         try:
             result = await self.agent.turn(text, session_id=session_id)
-            trace['outcome'] = 'returned'
-            return result
+            self._capture_execution(record, text, session_id, previous, reply=result, fallback='returned')
+            trace['outcome'] = record.status
+            return record.reply
+        except asyncio.CancelledError:
+            self._capture_execution(record, text, session_id, previous)
+            trace['outcome'] = record.status
+            raise
+        except Exception:
+            self._capture_execution(record, text, session_id, previous)
+            trace['outcome'] = record.status
+            return record.reply
         finally:
             after = getattr(self.agent, 'model_request_attempts', None)
             if type(before) is int and type(after) is int and after >= before:

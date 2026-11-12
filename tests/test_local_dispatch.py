@@ -108,7 +108,7 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(await dispatcher.turn(text, session_id='room'), 'Contextual response')
                 self.assertEqual(self.cloud.calls[-1], (text, 'room'))
         self.assertEqual(self.ha.calls, [])
-        self.assertEqual(len(dispatcher.ledger), 0)
+        self.assertEqual(len(dispatcher.ledger), 6)
 
     async def test_disable_flag_preserves_cloud_route(self):
         dispatcher = self.make(enabled=False)
