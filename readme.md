@@ -93,6 +93,13 @@ work with stricter edit/ambiguity thresholds. Recognized actions can correct
 registered target names; an independent opt-in enables deterministic Notepad
 launch through Windows MCP without model calls. See the linked testing flags.
 
+[Execution tracking](docs/EXECUTION_TRACKING.md) now covers local and contextual
+requests with the same retained-ID ledger and per-tool outcome records. Model
+failures after an action preserve partial results; retained retries do not repeat
+effects. On 2026-11-12, 150 checks passed locally and on the Pi, followed by
+user-confirmed nanoleafs/Notepad tests including an injected model failure.
+The 128-request ledger remains process-local and is not restart-persistent.
+
 ## Planned local and contextual boundary
 
 The unit of routing should be an **action or clause**, rather than the whole
