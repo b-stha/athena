@@ -101,14 +101,14 @@ class LightPhrasingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(text=text), self.assertRaises(UnknownCommand):
                 parse_action(text)
 
-    async def test_updated_fixed_corpus_closes_only_the_six_phrasing_gaps(self):
+    async def test_updated_corpus_preserves_six_phrasing_fixes_and_compound_progress(self):
         fixture = Path(__file__).parent / 'fixtures/routing_requests.json'
         with patch('socket.socket', side_effect=AssertionError('No network permitted')):
             report = await evaluate(fixture)
         self.assertEqual(report['summary']['policy_mismatch_cases'], 0)
-        self.assertEqual(report['summary']['observed_routes'], {'local': 16, 'cloud': 24, 'clarify': 3})
-        self.assertEqual(report['summary']['desired_route_gap_cases'], 14)
-        changed = [row for row in report['rows'] if row.get('baseline_route')]
+        self.assertEqual(report['summary']['observed_routes'], {'local': 17, 'cloud': 23, 'clarify': 3})
+        self.assertEqual(report['summary']['desired_route_gap_cases'], 13)
+        changed = [row for row in report['rows'] if row.get('baseline_route') and row['category'] == 'grammar_gap']
         self.assertEqual(len(changed), 6)
         for row in changed:
             self.assertEqual(row['baseline_route'], 'cloud')

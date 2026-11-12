@@ -51,6 +51,19 @@ class DirectHA:
     async def close(self):
         await self.client.aclose()
 
+    async def preflight(self, action):
+        validate_action(action)
+        if action.backend != 'home_assistant':
+            raise ValueError('Only registered HA actions are supported.')
+        response = await self.client.get(f'{self.config.url.rstrip("/")}/api/services',
+            headers={'Authorization': f'Bearer {self.config.token}'})
+        response.raise_for_status()
+        services = response.json()
+        if not isinstance(services, list) or not any(isinstance(item, dict)
+                and item.get('domain') == 'light' and isinstance(item.get('services'), dict)
+                and action.action in item['services'] for item in services):
+            raise ValueError('The requested HA light service is unavailable.')
+
     async def execute(self, action):
         validate_action(action)
         if action.backend != 'home_assistant':

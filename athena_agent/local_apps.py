@@ -68,6 +68,27 @@ class DirectApps:
         # Every request owns/closes its peer; no long-lived connection is retained.
         pass
 
+    async def preflight(self, action):
+        validate_action(action)
+        if (action.backend, action.action, action.target_type, action.target) != (
+                'desktop', 'launch_app', 'application', 'notepad'):
+            raise ValueError('Only registered Notepad launch is supported.')
+        peer = self.peer_factory(self.config.server, self.config.timeout, self.config.discovery_timeout)
+        try:
+            tools = await peer.start()
+            apps = [tool for tool in tools if tool.name == 'App']
+            if len(apps) != 1:
+                raise ValueError('Missing or ambiguous App tool.')
+            schema = apps[0].inputSchema
+            _local_refs_only(schema)
+            validator = validator_for(schema)
+            validator.check_schema(schema)
+            if not validator(schema).is_valid({'mode': 'launch_executable',
+                    'executable': self.config.executable, 'args': []}):
+                raise ValueError('Incompatible App schema.')
+        finally:
+            await peer.close()
+
     async def execute(self, action):
         validate_action(action)
         if (action.backend, action.action, action.target_type, action.target) != (

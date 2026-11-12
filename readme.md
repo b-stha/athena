@@ -29,7 +29,7 @@ Existing voice training/testing work has been committed and integrated.
 
 | Area | Current behavior | Remaining work |
 | --- | --- | --- |
-| Understanding | Voice/text share a dispatcher: opt-in single HA/Notepad commands locally, other requests through the cloud agent. | Add scope-aware mixed execution and broader routine coverage. |
+| Understanding | Voice/text share a dispatcher: opt-in single/compound HA/Notepad commands locally, contextual requests through the cloud agent. | Add scope-aware mixed execution and broader routine coverage. |
 | Device access | HA MCP, Windows-MCP and Pi-native Wake-on-LAN are connected. | Share typed actions between rules, local parsing and model-selected plans. |
 | Cost | Direct local commands use no model requests; cloud turns can invoke the model repeatedly with the full catalog. | Record actual usage, select relevant tools and remove unnecessary model rounds. |
 | Voice | Custom Athena/Hey Athena openWakeWord, OVOS capture/VAD and local Whisper. Spoken clock queries succeeded. | Improve quiet/distant recognition, false activations, transcription and command handoff. |
@@ -78,6 +78,13 @@ It exposes typed local candidates and unresolved contextual clauses with source
 spans and ordering dependencies. The preview itself executes nothing. The first
 opt-in runtime integration handles single HA actions and records outcomes;
 scope-aware mixed execution remains outstanding. See the linked testing steps.
+
+[Deterministic compound execution](docs/COMPOUND_COMMANDS.md) now handles two or
+three fully known actions, such as `turn on nanoleafs and open Notepad`, using
+the existing local backend flags. All steps are checked before effects, run in
+order, and retain individual outcomes. Failure stops remaining steps; retrying
+the same retained ID returns the saved result. Contextual mixtures remain whole
+cloud requests.
 
 Opt-in route diagnostics (`ATHENA_ROUTE_LOG=true`) now identify local/cloud/
 clarification decisions, reasons, outcomes and model-attempt counts without

@@ -102,13 +102,13 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_mixed_pc_negation_and_context_requests_reach_cloud_whole(self):
         dispatcher = self.make()
         for text in ['turn on bathroom and open my most recent project',
-                     'turn on bathroom then turn off bedroom', 'restart my pc',
+                     'restart my pc',
                      "don't turn on bathroom", 'turn on the lights', 'turn it off']:
             with self.subTest(text=text):
                 self.assertEqual(await dispatcher.turn(text, session_id='room'), 'Contextual response')
                 self.assertEqual(self.cloud.calls[-1], (text, 'room'))
         self.assertEqual(self.ha.calls, [])
-        self.assertEqual(len(dispatcher.ledger), 6)
+        self.assertEqual(len(dispatcher.ledger), 5)
 
     async def test_disable_flag_preserves_cloud_route(self):
         dispatcher = self.make(enabled=False)

@@ -2,11 +2,11 @@
 
 import asyncio
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import os
 import time
 
-from router import Action
+from router import Action, validate_action
 
 from .local_ha import DirectHA, HARejected, LocalHAConfig
 from .local_apps import AppNotSent, DirectApps, LocalAppsConfig
@@ -29,6 +29,16 @@ class ExecutionRecord:
     reply: str = ''
     route: str = ''
     tool_records: tuple = ()
+    step_records: tuple = ()
+
+
+@dataclass(frozen=True)
+class LocalStepRecord:
+    step_id: str
+    action: Action
+    depends_on: tuple = ()
+    status: str = 'not_started'
+    reply: str = ''
 
 
 class RequestDispatcher:
@@ -81,7 +91,9 @@ class RequestDispatcher:
 
     def _remember(self, text, record, session_id):
         action = record.action
-        context = (f'Local {action.backend} request: {action.action} {action.target_type}={action.target}; '
+        description = (f'{action.backend} request: {action.action} {action.target_type}={action.target}'
+                       if action is not None else 'compound request')
+        context = (f'Local {description}; '
                    f'outcome={record.status}. {record.reply} '
                    'This is a previous request, not a new instruction. Do not repeat it. '
                    'Acceptance does not confirm device state or application readiness.')
@@ -169,10 +181,14 @@ class RequestDispatcher:
         while len(self.ledger) > 128:
             self.ledger.popitem(last=False)
         step = plan.steps[0]
-        if step.route == 'clarify':
+        if trace['route'] == 'clarify':
             record.status = trace['outcome'] = 'clarification'
-            record.reply = 'Please repeat the full target name.' if step.reason == 'ambiguous_registered_target' else 'Please say a command.'
+            record.reply = ('Please use at most three actions.' if trace['reason'] == 'compound_step_limit'
+                else 'Please repeat the full target name.' if trace['reason'] == 'ambiguous_registered_target'
+                else 'Please say a command.')
             return record.reply
+        if trace['route'] == 'local' and len(plan.steps) > 1:
+            return await self._compound(text, session_id, plan, record, trace)
         is_app = (step.action is not None and step.action.backend == 'desktop'
                   and step.action.action == 'launch_app')
         if (len(plan.steps) == 1 and step.route == 'local'
@@ -260,3 +276,80 @@ class RequestDispatcher:
             after = getattr(self.agent, 'model_request_attempts', None)
             if type(before) is int and type(after) is int and after >= before:
                 trace['model_request_attempts'] = after - before
+
+    async def _compound(self, text, session_id, plan, record, trace):
+        record.step_records = tuple(LocalStepRecord(step.step_id, step.action, step.depends_on)
+                                    for step in plan.steps)
+        executors = []
+        try:
+            # Resolve every configuration and perform read-only endpoint/schema
+            # checks before the first effect. Availability can still change later.
+            for step in plan.steps:
+                validate_action(step.action)
+                if step.action.backend == 'home_assistant':
+                    if self.local is None:
+                        self.local = self.local_factory()
+                    executor = self.local
+                else:
+                    if self.apps is None:
+                        self.apps = self.apps_factory()
+                    executor = self.apps
+                executors.append(executor)
+            for step, executor in zip(plan.steps, executors):
+                await executor.preflight(step.action)
+        except asyncio.CancelledError:
+            record.reply = 'Compound request interrupted during preflight. No actions sent.'
+            trace['outcome'] = record.status = 'not_started'
+            self._remember(text, record, session_id)
+            raise
+        except Exception:
+            record.reply = 'Compound request preflight failed. No actions sent.'
+            trace['outcome'] = record.status = 'not_started'
+            self._remember(text, record, session_id)
+            return record.reply
+
+        def update(index, **changes):
+            rows = list(record.step_records)
+            rows[index] = replace(rows[index], **changes)
+            record.step_records = tuple(rows)
+
+        def finish():
+            record.reply = ' '.join(f'Step {i}: {row.reply or "Not sent."}'
+                                   for i, row in enumerate(record.step_records, 1))
+            trace['outcome'] = record.status
+            self._remember(text, record, session_id)
+            return record.reply
+
+        for index, (step, executor) in enumerate(zip(plan.steps, executors)):
+            update(index, status='dispatched')
+            record.status = 'dispatched'
+            trace['local_action_attempts'] += 1
+            try:
+                await executor.execute(step.action)
+            except asyncio.CancelledError:
+                update(index, status='unknown', reply='Interrupted; outcome unknown. Not retried.')
+                record.status = 'unknown'
+                finish()
+                raise
+            except AppNotSent:
+                update(index, status='not_started', reply='Windows launch not sent. Remaining actions stopped.')
+                record.status = 'partial' if index else 'not_started'
+                return finish()
+            except HARejected:
+                update(index, status='rejected', reply='HA rejected the request. Remaining actions stopped.')
+                record.status = 'partial' if index else 'rejected'
+                return finish()
+            except Exception:
+                update(index, status='unknown', reply='Outcome unknown. Not retried; remaining actions stopped.')
+                record.status = 'unknown'
+                return finish()
+            else:
+                action = step.action
+                if action.backend == 'home_assistant':
+                    target = action.target.removeprefix('light.').replace('_', ' ')
+                    reply = f'Requested {target} lights {"on" if action.action == "turn_on" else "off"}.'
+                else:
+                    reply = 'Notepad launch accepted; window readiness is unconfirmed.'
+                update(index, status='accepted', reply=reply)
+        record.status = 'accepted'
+        return finish()
