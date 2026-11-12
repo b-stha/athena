@@ -276,6 +276,13 @@ full recordings and 5/8 for retained audio. Longer rewind stayed at 5/8 and
 disabling final VAD trimming fell to 2/8, so live settings remain unchanged.
 These reused development recordings do not establish fresh or live accuracy.
 
+The [2026-11-12 background-speech replay](docs/AMBIENT_WAKE_BASELINE_20261112.md)
+processed one hour of newly recorded Discord/gaming room audio. With the user
+reporting no wake phrases, the frozen detector produced six candidates at the
+existing 0.98 threshold. Short candidate clips await acoustic review; this
+training-session baseline does not measure live interruptions or positive wake
+recall. Original recordings and a checksum-verified backup are preserved.
+
 Next voice work is reviewed quiet/normal/distant positives, long representative
 speech/music/room negatives and fresh held-out sessions; then compare wake
 recall, false activations, command capture and STT accuracy before selecting a
