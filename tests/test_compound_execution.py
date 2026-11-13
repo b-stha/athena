@@ -2,11 +2,11 @@ import asyncio
 import unittest
 from unittest.mock import Mock
 
-import httpx
 from mcp.types import Tool
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.local_apps import DirectApps, LocalAppsConfig
-from athena_agent.local_ha import DirectHA, LocalHAConfig, HARejected
+from athena_agent.local_ha import HomeAssistantMCP, LocalHAConfig, HANotSent, HARejected
+from ha_mcp_fixture import Peer
 from athena_agent.config import ServerConfig
 from router import parse_action
 
@@ -100,6 +100,18 @@ class CompoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await d.turn(text, request_id='partial'), first)
         self.assertEqual(sum(kind=='send' for kind,_ in self.events), 2)
 
+    async def test_ha_not_sent_after_first_step_preserves_partial_result(self):
+        d = self.make()
+        self.ha.error = HANotSent()
+        text = 'open Notepad then turn on nanoleafs then open Notepad'
+        first = await d.turn(text, request_id='not-sent')
+        self.assertEqual([row.status for row in d.ledger[('default', 'not-sent')].step_records],
+                         ['accepted', 'not_started', 'not_started'])
+        self.assertEqual(d.last_route_event.outcome, 'partial')
+        self.assertEqual(await d.turn(text, request_id='not-sent'), first)
+        self.assertEqual(sum(kind == 'send' for kind, _ in self.events), 2)
+        self.cloud.assert_not_called()
+
     async def test_cancellation_after_first_action_preserves_outcomes_for_retry(self):
         d = self.make()
         entered = asyncio.Event()
@@ -170,17 +182,14 @@ class CompoundTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(set(replies)), 1)
         self.assertEqual(sum(kind=='send' for kind,_ in self.events), 2)
 
-    async def test_ha_preflight_only_reads_service_catalog(self):
-        requests = []
-        def handle(request):
-            requests.append(request)
-            return httpx.Response(200, json=[{'domain':'light','services':{'turn_on':{}}}])
-        backend = DirectHA(LocalHAConfig('http://ha.test','test-token'), transport=httpx.MockTransport(handle))
-        try:
-            await backend.preflight(parse_action('turn on nanoleafs'))
-            self.assertEqual([(r.method,r.url.path) for r in requests], [('GET','/api/services')])
-        finally:
-            await backend.close()
+    async def test_ha_preflight_only_reads_mcp_inventory(self):
+        peer = Peer()
+        backend = HomeAssistantMCP(LocalHAConfig(ServerConfig('ha', 'http://ha.test/mcp', 'test-token')),
+                                   peer_factory=lambda *args: peer)
+        await backend.preflight(parse_action('turn on nanoleafs'))
+        self.assertEqual(peer.calls, [('homeassistant__GetLiveContext', {'domain': 'light'})])
+        self.assertEqual(peer.effects, [])
+        self.assertTrue(peer.closed)
 
     async def test_windows_preflight_checks_schema_and_closes_without_app_call(self):
         for schema in [{'type':'object'}, {'type':'object','required':['impossible']}]:

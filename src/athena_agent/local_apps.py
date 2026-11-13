@@ -4,12 +4,12 @@ from dataclasses import dataclass
 import json
 import math
 import os
-from pathlib import Path, PureWindowsPath
+from pathlib import PureWindowsPath
 
 from jsonschema.validators import validator_for
 
 from router import validate_action
-from .config import ServerConfig
+from .config import ServerConfig, load_server_config
 from .tools import MCPPeer, _local_refs_only
 
 
@@ -42,22 +42,8 @@ class LocalAppsConfig:
 
     @classmethod
     def from_env(cls):
-        # Read only Windows transport settings. No model configuration is needed.
-        path = Path(os.getenv('ATHENA_AGENT_CONFIG', 'agent.local.json'))
-        settings = json.loads(path.read_text(encoding='utf-8'))
-        if not isinstance(settings, dict):
-            raise ValueError('Application configuration must be a JSON object.')
-        servers = settings.get('servers', [])
-        if not isinstance(servers, list):
-            raise ValueError('Application servers must be a list.')
-        matches = [item for item in servers if isinstance(item, dict) and item.get('name') == 'windows']
-        if len(matches) != 1 or set(matches[0]) != {'name', 'url', 'token_env'}:
-            raise ValueError('Configure one windows MCP server for local application launch.')
-        item = matches[0]
-        if not isinstance(item['token_env'], str):
-            raise ValueError('Windows token_env must name an environment variable.')
-        server = ServerConfig('windows', item['url'], os.getenv(item['token_env'], ''))
-        return cls(server, os.getenv('ATHENA_NOTEPAD_EXECUTABLE', r'C:\Windows\System32\notepad.exe'))
+        return cls(load_server_config('windows'),
+                   os.getenv('ATHENA_NOTEPAD_EXECUTABLE', r'C:\Windows\System32\notepad.exe'))
 
 
 class DirectApps:

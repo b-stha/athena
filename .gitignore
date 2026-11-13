@@ -13,3 +13,6 @@ dist/
 # Preserve exclusions for any models downloaded before the OVOS migration.
 voice/models/*.tflite
 voice/models/*.onnx
+
+# Local documentation (already tracked files remain versioned).
+/docs/

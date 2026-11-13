@@ -26,9 +26,11 @@ def legacy_text_mode():
                 print("Wake packet sent. PC startup is not confirmed.")
             elif action.backend == "desktop" and action.action in {"shutdown", "restart", "sleep"}:
                 print(f"{action.action.capitalize()} accepted by the desktop client.")
+            elif action.backend == "home_assistant":
+                print(f"Requested lights {action.action.removeprefix('turn_')}. Physical state is not confirmed.")
             else:
                 print(f"Done: {action.action} {action.target}")
-        except (ValueError, RequestException) as error:
+        except (ValueError, RuntimeError, RequestException) as error:
             print(f"Command failed: {error}")
 
 
@@ -61,9 +63,9 @@ def main():
     parser = argparse.ArgumentParser(description="Athena's OVOS voice frontend")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--text", action="store_true", help="type requests for the same agent used by voice")
-    modes.add_argument("--legacy-text", action="store_true", help="diagnose the retired deterministic REST backends")
+    modes.add_argument("--legacy-text", action="store_true", help="standalone diagnostics: HA MCP, Wake-on-LAN, historical Desktop HTTP")
     modes.add_argument("--check-agent-config", action="store_true", help="validate model/MCP settings without connecting")
-    modes.add_argument("--check-local-config", action="store_true", help="validate direct HA settings without connecting")
+    modes.add_argument("--check-local-config", action="store_true", help="validate deterministic HA MCP settings without connecting")
     parser.add_argument("--wake-engine", choices=("custom", "precise"),
                         default=os.getenv("ATHENA_WAKE_ENGINE", "custom"),
                         help="wake detector (default: custom trained openWakeWord model)")
@@ -102,7 +104,7 @@ def main():
         if args.check_local_config:
             from athena_agent.local_ha import LocalHAConfig
             LocalHAConfig.from_env()
-            print("Direct Home Assistant configuration is valid. No network request or device action was made.")
+            print("Home Assistant MCP configuration is valid. No model request, network connection or device action was made.")
             return 0
         if args.check_agent_config:
             from athena_agent.config import AgentConfig

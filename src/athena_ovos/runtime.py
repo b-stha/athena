@@ -132,6 +132,9 @@ def prepare_environment(root, model=None, *, device="reSpeaker Flex XVF3800", bu
         "XDG_CONFIG_HOME": str(state / "config"), "XDG_DATA_HOME": str(state / "data"),
         "XDG_CACHE_HOME": str(state / "cache"), "PYTHONUNBUFFERED": "1",
     })
+    source = root / 'src'
+    if (source / 'athena_ovos').is_dir():
+        env['PYTHONPATH'] = str(source) + (os.pathsep + env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
     return env, config
 
 

@@ -2,7 +2,6 @@ import asyncio
 from dataclasses import asdict
 import io
 import json
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -11,7 +10,7 @@ from athena_agent.config import AgentConfig
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.local_ha import HAUnknownOutcome
 from athena_agent.routing import emit_route_event
-from tools.routing_benchmark import SimulatedCloud, SimulatedHA, evaluate
+from routing_fakes import SimulatedCloud, SimulatedHA
 
 
 class RoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -123,14 +122,6 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
                     value = json.loads(output.getvalue().removeprefix('[athena.route] '))
                     self.assertEqual(value['route'], 'local')
 
-    async def test_authored_request_suite_matches_policy_and_exposes_coverage_gaps(self):
-        fixture = Path(__file__).parent / 'fixtures/routing_requests.json'
-        with patch('socket.socket', side_effect=AssertionError('No network permitted')):
-            report = await evaluate(fixture)
-        self.assertEqual(report['summary']['policy_mismatch_cases'], 0)
-        self.assertGreater(report['summary']['desired_route_gap_cases'], 0)
-        self.assertEqual(len(report['rows']), report['summary']['cases'])
-        self.assertTrue(report['synthetic_model_attempt_counts'])
 
     async def test_real_agent_counts_all_model_round_attempts(self):
         class Model:

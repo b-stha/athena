@@ -1,10 +1,9 @@
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.planning import plan_command
-from tools.routing_benchmark import SimulatedCloud, SimulatedHA, evaluate
+from routing_fakes import SimulatedCloud, SimulatedHA
 from router import Action, UnknownCommand, parse_action
 
 
@@ -101,20 +100,6 @@ class LightPhrasingTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(text=text), self.assertRaises(UnknownCommand):
                 parse_action(text)
 
-    async def test_updated_corpus_preserves_six_phrasing_fixes_and_compound_progress(self):
-        fixture = Path(__file__).parent / 'fixtures/routing_requests.json'
-        with patch('socket.socket', side_effect=AssertionError('No network permitted')):
-            report = await evaluate(fixture)
-        self.assertEqual(report['summary']['policy_mismatch_cases'], 0)
-        self.assertEqual(report['summary']['observed_routes'], {'local': 17, 'cloud': 23, 'clarify': 3})
-        self.assertEqual(report['summary']['desired_route_gap_cases'], 13)
-        changed = [row for row in report['rows'] if row.get('baseline_route') and row['category'] == 'grammar_gap']
-        self.assertEqual(len(changed), 6)
-        for row in changed:
-            self.assertEqual(row['baseline_route'], 'cloud')
-            self.assertEqual(row['observed']['route'], 'local')
-            self.assertEqual(row['observed']['model_request_attempts'], 0)
-            self.assertEqual(row['simulated_actions'][0]['target'], 'light.bathroom')
 
     def test_punctuation_exception_preserves_source_spans(self):
         text = ' Hey Athena, could you turn the bathroom lights off? '

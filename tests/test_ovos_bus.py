@@ -52,8 +52,6 @@ class OVOSBusIntegrationTests(unittest.TestCase):
                     if self.path == "/commands":
                         response = {"requestId": body["requestId"], "success": True,
                                     "message": "Fake desktop accepted."}
-                    elif self.path.startswith("/api/services/light/"):
-                        response = []
                     else:
                         self.send_error(404)
                         return
@@ -77,7 +75,7 @@ class OVOSBusIntegrationTests(unittest.TestCase):
             http_url = f"http://127.0.0.1:{cls.http.server_port}"
             env.update({"HOME": str(cls.root),
                         "XDG_CONFIG_DIRS": str(cls.root / "empty-system-config"),
-                        "DESKTOP_URL": http_url, "HA_URL": http_url, "HA_TOKEN": "test-token"})
+                        "DESKTOP_URL": http_url})
             cls.log = (cls.root / "services.log").open("w+", encoding="utf-8")
 
             # Apply the sentinel only to this test's skills child. It prevents

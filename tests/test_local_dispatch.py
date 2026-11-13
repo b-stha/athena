@@ -1,18 +1,13 @@
 import asyncio
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
-import json
 import os
 import threading
 import unittest
 from unittest.mock import Mock, patch
 
-import httpx
 
 from athena_agent.dispatcher import RequestDispatcher
-from athena_agent.local_ha import DirectHA, HARejected, HAUnknownOutcome, LocalHAConfig
-from router import Action, parse_action
+from athena_agent.local_ha import HARejected, HAUnknownOutcome
 
 
 class FakeHA:
@@ -170,69 +165,6 @@ class DispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(len(turns) <= 6 for turns in dispatcher.pending_context.values()))
 
 
-class DirectHATests(unittest.IsolatedAsyncioTestCase):
-    async def send(self, handler, action=None):
-        backend = DirectHA(LocalHAConfig('http://ha.test', 'private-token'),
-                           transport=httpx.MockTransport(handler))
-        self.addAsyncCleanup(backend.close)
-        await backend.execute(action or parse_action('turn on bathroom'))
-
-    async def test_authenticated_entity_and_area_service_payloads(self):
-        for text, key, value in [('turn on bathroom', 'entity_id', 'light.bathroom'),
-                                 ('turn off bedroom lights', 'area_id', 'bedroom')]:
-            seen = []
-            def handler(request):
-                seen.append(request)
-                self.assertEqual(request.headers['authorization'], 'Bearer private-token')
-                self.assertEqual(json.loads(request.content), {key: value})
-                return httpx.Response(200, json=[])
-            action = parse_action(text)
-            await self.send(handler, action)
-            self.assertEqual(len(seen), 1)
-            self.assertEqual(seen[0].url.path, f'/api/services/light/{action.action}')
-
-    async def test_rejection_server_error_redirect_and_malformed_result_do_not_retry(self):
-        for status, body, error in [(401, {}, HARejected), (429, {}, HARejected),
-                                    (500, {}, HAUnknownOutcome), (408, {}, HAUnknownOutcome),
-                                    (302, {}, HAUnknownOutcome), (200, {}, HAUnknownOutcome)]:
-            seen = []
-            def handler(request):
-                seen.append(request)
-                return httpx.Response(status, json=body, headers={'Location': 'http://other.test'})
-            with self.subTest(status=status), self.assertRaises(error):
-                await self.send(handler)
-            self.assertEqual(len(seen), 1)
-
-    async def test_timeout_and_disconnect_are_unknown_without_retry(self):
-        for error in [httpx.ReadTimeout('private detail'), httpx.RemoteProtocolError('private detail')]:
-            seen = []
-            def handler(request):
-                seen.append(request)
-                raise error
-            with self.subTest(error=type(error).__name__), self.assertRaises(HAUnknownOutcome) as result:
-                await self.send(handler)
-            self.assertNotIn('private detail', str(result.exception))
-            self.assertEqual(len(seen), 1)
-
-    async def test_unregistered_and_non_ha_actions_cannot_reach_http(self):
-        handler = Mock(side_effect=AssertionError('No request permitted'))
-        for action in [Action('home_assistant', 'turn_on', 'light.unknown'), parse_action('restart pc')]:
-            with self.assertRaises(ValueError):
-                await self.send(handler, action)
-        handler.assert_not_called()
-
-    async def test_non_json_success_response_is_unknown(self):
-        with self.assertRaises(HAUnknownOutcome):
-            await self.send(lambda request: httpx.Response(200, text='<html>login</html>'))
-
-    def test_configuration_rejects_invalid_origins_and_hides_token(self):
-        for url in ['', 'ftp://ha.test', 'http://u:p@ha.test', 'http://ha.test/api',
-                    'http://ha.test?x=1', 'http://ha.test:bad', 'http://ha. test']:
-            with self.subTest(url=url), self.assertRaises(ValueError):
-                LocalHAConfig(url, 'token')
-        self.assertNotIn('private-token', repr(LocalHAConfig('http://ha.test', 'private-token')))
-
-
 class AgentLocalHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_local_result_reaches_real_agent_history_without_a_model_request(self):
         from athena_agent.agent import Agent
@@ -269,60 +201,12 @@ class AgentLocalHistoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(m.get('content') == 'local request 2' for m in model.messages[1]))
 
 
-@contextmanager
-def fake_ha_http(status=200, disconnect=False):
-    seen = []
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-        def do_POST(self):
-            seen.append((self.path, self.headers.get('Authorization'),
-                         json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
-            if disconnect:
-                self.connection.close()
-                return
-            body = b'[]'
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
-    thread.start()
-    try:
-        yield f'http://127.0.0.1:{server.server_port}', seen
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(2)
-
-
-class HTTPIntegrationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_real_http_service_accept_reject_failure_and_disconnect(self):
-        for status, disconnect, expected in [(200, False, 'accepted'), (401, False, 'rejected'),
-                                               (500, False, 'unknown'), (200, True, 'unknown')]:
-            with self.subTest(status=status, disconnect=disconnect), fake_ha_http(status, disconnect) as (url, seen):
-                cloud = Mock(side_effect=AssertionError('No cloud allowed'))
-                dispatcher = RequestDispatcher(local_enabled=True, agent_factory=cloud,
-                    local_factory=lambda: DirectHA(LocalHAConfig(url, 'fake-token')))
-                try:
-                    first = await dispatcher.turn('turn on bathroom', request_id='http')
-                    self.assertEqual(first, await dispatcher.turn('turn on bathroom', request_id='http'))
-                    self.assertEqual(dispatcher.ledger[('default', 'http')].status, expected)
-                    self.assertEqual(seen, [('/api/services/light/turn_on', 'Bearer fake-token',
-                                            {'entity_id': 'light.bathroom'})])
-                    cloud.assert_not_called()
-                finally:
-                    await dispatcher.close()
-
-
 class EntryPointTests(unittest.TestCase):
     def test_text_mode_uses_local_dispatch_without_model_settings(self):
         import main
         backend = FakeHA()
         with patch.dict(os.environ, {'ATHENA_LOCAL_HA_ENABLED': 'true'}, clear=True), \
-                patch('athena_agent.dispatcher.DirectHA', return_value=backend), \
+                patch('athena_agent.dispatcher.HomeAssistantMCP', return_value=backend), \
                 patch('athena_agent.dispatcher.LocalHAConfig.from_env'), \
                 patch('athena_agent.dispatcher.cloud_agent', side_effect=AssertionError('No model')), \
                 patch('builtins.input', side_effect=['turn on bathroom', 'exit']), \
@@ -342,7 +226,7 @@ class EntryPointTests(unittest.TestCase):
             errors.append(text)
             done.set()
         with patch.dict(os.environ, {'ATHENA_LOCAL_HA_ENABLED': 'true'}, clear=True), \
-                patch('athena_agent.dispatcher.DirectHA', return_value=backend), \
+                patch('athena_agent.dispatcher.HomeAssistantMCP', return_value=backend), \
                 patch('athena_agent.dispatcher.LocalHAConfig.from_env'), \
                 patch('athena_agent.dispatcher.cloud_agent', side_effect=AssertionError('No model')):
             worker = AgentWorker()

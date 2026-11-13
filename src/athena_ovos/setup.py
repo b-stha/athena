@@ -70,8 +70,8 @@ def download_model(
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Install Athena's pretrained wake-word model")
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parent.parent,
-        help="Athena project directory (defaults to this checkout)",
+        "--root", type=Path, default=_project_root(),
+        help="Athena project directory (defaults to the source checkout or working directory)",
     )
     parser.add_argument(
         "--model", type=Path,
@@ -90,6 +90,13 @@ def main(argv=None) -> int:
         return 1
     print(model)
     return 0
+
+
+def _project_root():
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / 'pyproject.toml').is_file() and (candidate / 'src/athena_ovos').is_dir():
+            return candidate
+    return Path.cwd()
 
 
 if __name__ == "__main__":

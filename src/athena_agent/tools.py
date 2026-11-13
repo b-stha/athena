@@ -115,7 +115,11 @@ class MCPPeer:
                                         "Outcome is unknown; the action was not retried."))
                                 return
                             finally:
-                                active = None
+                                # SDK stream failures may cancel this actor rather than
+                                # raise an Exception. Keep its pending caller visible to
+                                # the outer cleanup so it receives an unknown outcome.
+                                if active.done():
+                                    active = None
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -143,7 +147,10 @@ class MCPPeer:
             if not self.task.done():
                 self.queue.put_nowait(None)
             try:
-                await asyncio.wait_for(self.task, min(self.timeout + 2, 10))
+                # A cancelled transport actor is a closed peer, not cancellation
+                # of the caller that is recording its uncertain execution result.
+                await asyncio.wait_for(asyncio.gather(self.task, return_exceptions=True),
+                                       min(self.timeout + 2, 10))
             except asyncio.TimeoutError:
                 self.task.cancel()
                 await asyncio.gather(self.task, return_exceptions=True)

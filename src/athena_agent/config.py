@@ -37,6 +37,24 @@ class ServerConfig:
             raise ValueError(f"Set the bearer token for MCP server {self.name}.")
 
 
+def load_server_config(name, config_path=None):
+    """Load one MCP endpoint without requiring a model or other server tokens."""
+    path = Path(config_path or os.getenv("ATHENA_AGENT_CONFIG", "agent.local.json"))
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise ValueError("Could not read the MCP JSON configuration.") from None
+    if not isinstance(settings, dict) or not isinstance(settings.get("servers"), list):
+        raise ValueError("Configure an MCP servers list in agent.local.json.")
+    matches = [item for item in settings["servers"] if isinstance(item, dict) and item.get("name") == name]
+    if len(matches) != 1 or set(matches[0]) != {"name", "url", "token_env"}:
+        raise ValueError(f"Configure exactly one {name} MCP server with name, url and token_env.")
+    item = matches[0]
+    if not isinstance(item["token_env"], str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", item["token_env"]):
+        raise ValueError("token_env must name an environment variable.")
+    return ServerConfig(name, item["url"], os.getenv(item["token_env"], ""))
+
+
 @dataclass(frozen=True)
 class AgentConfig:
     model_url: str

@@ -15,4 +15,5 @@ if [[ ! -x .venv/bin/python ]]; then
     exit 1
 fi
 
+export PYTHONPATH="$athena_dir/src${PYTHONPATH:+:$PYTHONPATH}"
 exec "$athena_dir/.venv/bin/python" "$athena_dir/main.py" "$@"

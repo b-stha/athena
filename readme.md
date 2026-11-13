@@ -15,22 +15,19 @@ typed command ----------------------+-> planner -> deterministic HA/Windows acti
 
 | Location | Purpose |
 | --- | --- |
-| `athena_agent/` | Runtime planning, local execution, cloud/MCP loop and tracking |
-| `athena_ovos/`, `athena_skill/` | Live audio adapters, OVOS services and transcript bridge |
-| `athena_wake/` | Live detector and threshold/sample-clock logic |
-| `router.py`, `resolver.py`, `integrations/` | Registered actions, fuzzy targets, Wake-on-LAN and legacy diagnostics |
+| `src/athena_agent/` | Runtime planning, local execution, cloud/MCP loop and tracking |
+| `src/athena_ovos/`, `src/athena_skill/` | Live audio adapters, OVOS services and transcript bridge |
+| `src/athena_wake/` | Live detector and threshold/sample-clock logic |
+| `src/router.py`, `src/resolver.py`, `src/integrations/` | Registered actions, fuzzy targets, Wake-on-LAN and legacy diagnostics |
 | `tests/` | Runtime regression tests and fixtures |
 | `voice/` | Runtime voice setup, selected model profile and inference pins |
-| `docs/` | Current architecture, setup and execution contracts |
-| `docs/history/` | Dated designs and routing observations retained for provenance |
-| `tools/` | Checkout-only routing benchmark and independent voice-development project |
+| `docs/` | Local, ignored documentation; no longer versioned |
+| `../athena_tools/` | External developer tools; not part of this repository |
 
 Recording, synthesis, feature preparation, training, replay, speech benchmarks and
 the experimental buffered frontend are in the separate
-[voice lab](tools/voice_lab/README.md). They are excluded from the runtime wheel.
-Existing datasets and models remain in their external workspace. See
-[the file/significance audit](docs/REPOSITORY_LAYOUT.md) for why modules were kept
-or moved and which commits introduced them.
+voice lab at `../athena_tools/voice_lab`. They are excluded from the runtime wheel.
+Existing datasets and models remain in their external workspace. The core has no import dependency on those external developer tools.
 
 ## Install and configure
 
@@ -48,9 +45,9 @@ Configure the cloud endpoint/model, HA and Windows MCP bearer tokens, and the
 three custom wake-model paths. Installation does not train/download a custom wake
 model. Configure the existing local Whisper service separately.
 
-[Agent setup](docs/AGENT_SETUP.md) documents the endpoint and secret settings.
-[Voice setup](voice/README.md) covers microphone/runtime options, and
-[the selected model](docs/VOICE_MODEL.md) records inference assets and limitations.
+The public configuration examples describe endpoint and secret settings.
+[Voice setup](voice/README.md) covers microphone/runtime options; the selected
+[model profile](voice/custom-wake-model.json) records asset hashes and settings.
 The existing provisioned Pi's private `~/.local/bin/athena` launcher also loads
 `~/.config/athena/secrets.env`; generic `run.sh` loads only the checkout `.env`.
 Keep secrets, recordings, weights, virtual environments and model outputs out of Git.
@@ -76,7 +73,8 @@ checkout do not automatically update another checkout or restart an installed se
 
 ## Current behavior
 
-- Registered HA light on/off actions use direct REST with local acknowledgement.
+- Registered HA light on/off actions call HA MCP directly, with local acknowledgement
+  and no model requests. Both paths share the `ha` MCP endpoint/token.
 - Registered Notepad launches use fixed Windows-MCP arguments without model calls.
 - Two or three complete supported clauses execute in order after read-only
   whole-plan preflight: `turn on nanoleafs and open Notepad`.
@@ -92,14 +90,16 @@ checkout do not automatically update another checkout or restart an installed se
   automatically retried or redirected through another transport.
 - Responses are visible in the terminal/journal. A TTS service is not implemented.
 
-Details: [architecture](docs/ARCHITECTURE.md), [planning](docs/COMMAND_PLANNING.md),
-[fuzzy targets](docs/FUZZY_TARGETS.md), [compound execution](docs/COMPOUND_COMMANDS.md),
-[execution tracking](docs/EXECUTION_TRACKING.md), and [next work](docs/DEVELOPMENT_PLAN.md).
+Additional architecture/research notes may exist locally under ignored `docs/`.
+They are not runtime dependencies or automatically supplied to the LLM.
 
 The Windows repository is the signed-in desktop supervisor for Windows-MCP; the
-Pi is its MCP client. See [Athena Desktop](../athena-desktop/README.md).
-Explicit `--legacy-text` diagnostics and the Precise wake compatibility adapter
-remain supported. Their reachable modules were preserved during cleanup.
+Pi is its MCP client. See [Athena Desktop](https://github.com/b-stha/athena-desktop).
+Explicit `--legacy-text` diagnostics remain available for HA and Wake-on-LAN.
+Their Desktop app/power HTTP requests require a Desktop version from before the
+legacy backend was removed; current Desktop uses Windows-MCP. See
+[legacy integration scope](src/integrations/README.md). The Precise wake compatibility
+adapter remains available independently of the Desktop transport.
 
 ## Verify and develop
 
@@ -113,10 +113,10 @@ These tests use fake models/devices or loopback HTTP; they do not require paid
 model requests or real device effects. Optional dependency cases can be skipped
 by the test runner. The independent lab has its own installation and test suite.
 
-[Developer tools](tools/README.md) documents the routing benchmark and new lab CLI
+[Developer tools](../athena_tools/README.md) documents the routing benchmark and new lab CLI
 namespace. Lab installation/testing is separate from starting Athena; model
 training remains subject to the external workspace's persistent pause control.
 
 Historical measurements, account-specific cost assumptions and earlier designs
-are preserved in [history](docs/history/) and the lab's documentation rather than
+are preserved in [history](docs/history) and the lab's documentation rather than
 presented as current guarantees. No cleanup changes promote a different model.

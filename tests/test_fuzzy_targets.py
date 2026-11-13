@@ -1,7 +1,7 @@
 import asyncio
 import json
-import os
 from pathlib import Path
+import os
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,7 +12,7 @@ from athena_agent.config import ServerConfig
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.local_apps import AppNotSent, AppUnknownOutcome, DirectApps, LocalAppsConfig
 from athena_agent.planning import plan_command
-from tools.routing_benchmark import SimulatedCloud, SimulatedHA
+from routing_fakes import SimulatedCloud, SimulatedHA
 from resolver import AmbiguousTarget, resolve_target
 from router import Action
 

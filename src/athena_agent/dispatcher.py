@@ -8,14 +8,14 @@ import time
 
 from router import Action, validate_action
 
-from .local_ha import DirectHA, HARejected, LocalHAConfig
+from .local_ha import HomeAssistantMCP, HANotSent, HARejected, LocalHAConfig
 from .local_apps import AppNotSent, DirectApps, LocalAppsConfig
 from .planning import plan_command
 from .routing import RouteEvent, emit_route_event, route_reason
 
 
 def cloud_agent():
-    # Local turns never load/validate model credentials or initialize MCP.
+    # Only contextual turns initialize the model and its multi-server registry.
     from .agent import Agent
     from .config import AgentConfig
     return Agent(AgentConfig.from_env())
@@ -67,7 +67,7 @@ class RequestDispatcher:
             raise ValueError('apps_enabled must be boolean.')
         self.apps_enabled = apps_enabled
         self.agent_factory = agent_factory or cloud_agent
-        self.local_factory = local_factory or (lambda: DirectHA(LocalHAConfig.from_env()))
+        self.local_factory = local_factory or (lambda: HomeAssistantMCP(LocalHAConfig.from_env()))
         self.apps_factory = apps_factory or (lambda: DirectApps(LocalAppsConfig.from_env()))
         self.apps = None
         self.agent = self.local = None
@@ -215,6 +215,9 @@ class RequestDispatcher:
                 except AppNotSent:
                     record.status = 'not_started'
                     record.reply = 'Windows MCP was unavailable or incompatible. No launch sent.'
+                except HANotSent:
+                    record.status = 'not_started'
+                    record.reply = 'Home Assistant MCP was unavailable, incompatible or ambiguous. No action sent.'
                 except HARejected:
                     record.status = 'rejected'
                     record.reply = f'{label} rejected the request. It was not retried.'
@@ -333,6 +336,10 @@ class RequestDispatcher:
                 raise
             except AppNotSent:
                 update(index, status='not_started', reply='Windows launch not sent. Remaining actions stopped.')
+                record.status = 'partial' if index else 'not_started'
+                return finish()
+            except HANotSent:
+                update(index, status='not_started', reply='HA action not sent. Remaining actions stopped.')
                 record.status = 'partial' if index else 'not_started'
                 return finish()
             except HARejected:

@@ -9,11 +9,11 @@ Run on the Pi with the microphone attached. SSH does not forward the PC's
 microphone, and voice mode does not need an interactive terminal.
 
 For custom **Athena / Hey Athena** evaluation work, see
-[recording, replay and buffered handoff](../tools/voice_lab/docs/WAKE_EVALUATION.md) and
-[training compatibility and data collection](../tools/voice_lab/docs/TRAINING.md). The live adapter
+[recording, replay and buffered handoff](../../athena_tools/voice_lab/docs/WAKE_EVALUATION.md) and
+[training compatibility and data collection](../../athena_tools/voice_lab/docs/TRAINING.md). The live adapter
 uses the same openWakeWord inference implementation as the replay tools.
-The [voice-lab guide](../tools/voice_lab/README.md) documents the separate tooling
-installation and CLI migration. The [earlier provisioning record](../tools/voice_lab/docs/TRAINING_SETUP.md)
+The [voice-lab guide](../../athena_tools/voice_lab/README.md) documents the separate tooling
+installation and CLI migration. The [earlier provisioning record](../../athena_tools/voice_lab/docs/TRAINING_SETUP.md)
 preserves the Pi recorder and PC pause-control history. Training remains paused.
 
 ## Install
@@ -59,9 +59,11 @@ WHISPER_URI=tcp://127.0.0.1:10300
 ```
 
 Cloud model, MCP token and Wake-on-LAN settings remain in `.env`. Configure
-`agent.local.json` using [agent setup](../docs/AGENT_SETUP.md). Legacy `HA_URL`,
-`HA_TOKEN` and `DESKTOP_URL` are used only by `--legacy-text` diagnostics. Athena
-loads environment settings before starting OVOS services.
+`agent.local.json` using [agent setup](../docs/AGENT_SETUP.md). HA commands share
+the `ha` MCP server entry and its named token; `HA_URL`/`HA_TOKEN` are obsolete.
+`DESKTOP_URL` is only for historical `--legacy-text` HTTP requests, which require
+an older Desktop that still exposes the HTTP backend. Normal voice/text Windows
+commands use MCP. Athena loads environment settings before starting OVOS services.
 OVOS configuration and caches are isolated under `.ovos`, leaving other OVOS
 installations' settings separate.
 
