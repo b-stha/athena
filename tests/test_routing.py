@@ -11,7 +11,7 @@ from athena_agent.config import AgentConfig
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.local_ha import HAUnknownOutcome
 from athena_agent.routing import emit_route_event
-from athena_agent.routing_benchmark import SimulatedCloud, SimulatedHA, evaluate
+from tools.routing_benchmark import SimulatedCloud, SimulatedHA, evaluate
 
 
 class RoutingTests(unittest.IsolatedAsyncioTestCase):

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.planning import plan_command
-from athena_agent.routing_benchmark import SimulatedCloud, SimulatedHA, evaluate
+from tools.routing_benchmark import SimulatedCloud, SimulatedHA, evaluate
 from router import Action, UnknownCommand, parse_action
 
 

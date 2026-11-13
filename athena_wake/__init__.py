@@ -1,1 +1,1 @@
-"""Opt-in wake-word recording and evaluation tools, independent of OVOS."""
+"""Live wake inference and sample-clock triggering; offline tools live in the voice lab."""

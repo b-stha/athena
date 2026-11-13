@@ -12,7 +12,7 @@ from athena_agent.config import ServerConfig
 from athena_agent.dispatcher import RequestDispatcher
 from athena_agent.local_apps import AppNotSent, AppUnknownOutcome, DirectApps, LocalAppsConfig
 from athena_agent.planning import plan_command
-from athena_agent.routing_benchmark import SimulatedCloud, SimulatedHA
+from tools.routing_benchmark import SimulatedCloud, SimulatedHA
 from resolver import AmbiguousTarget, resolve_target
 from router import Action
 

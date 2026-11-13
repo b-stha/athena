@@ -9,8 +9,9 @@ if [[ ! -x .venv/bin/python ]]; then
     echo "  python3 -m venv .venv" >&2
     echo "  .venv/bin/python -m pip install -r requirements.txt" >&2
     echo "  .venv/bin/python -m pip install -r requirements-agent.txt" >&2
-    echo "  .venv/bin/python -m pip install -e '.[agent]'" >&2
-    echo "  .venv/bin/python -m athena_ovos.setup" >&2
+    echo "  .venv/bin/python -m pip install -r voice/requirements-wake.txt" >&2
+    echo "  .venv/bin/python -m pip install -e '.[agent,wake]'" >&2
+    echo "Configure the three custom ONNX model paths described in voice/README.md." >&2
     exit 1
 fi
 

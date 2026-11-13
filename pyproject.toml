@@ -37,6 +37,7 @@ py-modules = ["router", "resolver"]
 
 [tool.setuptools.packages.find]
 include = ["athena_ovos*", "athena_skill*", "athena_wake*", "athena_agent*", "integrations*"]
+exclude = ["tools*", "tests*"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}

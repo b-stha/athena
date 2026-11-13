@@ -9,11 +9,12 @@ Run on the Pi with the microphone attached. SSH does not forward the PC's
 microphone, and voice mode does not need an interactive terminal.
 
 For custom **Athena / Hey Athena** evaluation work, see
-[recording, replay and buffered handoff](WAKE_EVALUATION.md) and
-[training compatibility and data collection](TRAINING.md). The live adapter
+[recording, replay and buffered handoff](../tools/voice_lab/docs/WAKE_EVALUATION.md) and
+[training compatibility and data collection](../tools/voice_lab/docs/TRAINING.md). The live adapter
 uses the same openWakeWord inference implementation as the replay tools.
-The [current training setup](TRAINING_SETUP.md) includes the ready-to-run Pi
-recording command and the PC's persistent GPU pause control.
+The [voice-lab guide](../tools/voice_lab/README.md) documents the separate tooling
+installation and CLI migration. The [earlier provisioning record](../tools/voice_lab/docs/TRAINING_SETUP.md)
+preserves the Pi recorder and PC pause-control history. Training remains paused.
 
 ## Install
 
