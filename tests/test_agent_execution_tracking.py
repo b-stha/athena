@@ -60,7 +60,8 @@ class Registry:
         pass
 
     def definitions(self):
-        return []
+        return [{'type': 'function', 'function': {'name': 'ha__switch',
+                'parameters': {'type': 'object'}}}]
 
     async def call(self, name, arguments):
         self.calls.append((name, arguments))

@@ -8,6 +8,7 @@ import json
 import os
 
 from .model import CloudModel, ModelError
+from .planning import cloud_tool_servers
 from .tools import ToolError, ToolRegistry, UncertainToolError
 
 
@@ -145,15 +146,24 @@ class Agent:
         for previous in turns:
             prefix.extend(deepcopy(previous))
         current = [{"role": "user", "content": text}]
+        servers = cloud_tool_servers(text)
+        registry_config = self.config if servers is None else replace(
+            self.config, servers=tuple(server for server in self.config.servers if server.name in servers))
         try:
-            async with self.registry_factory(self.config) as registry:
+            async with self.registry_factory(registry_config) as registry:
                 tools = registry.definitions()
-                wake_enabled = bool(os.getenv("PC_MAC_ADDRESS", "").strip())
+                if servers is not None:
+                    tools = [tool for tool in tools if any(
+                        tool['function']['name'].startswith(server + '__') for server in servers)]
+                    prefix[0]['content'] += ('\nThis request is limited to Home Assistant. '
+                        'If the device is unclear, ask for clarification. Do not search Windows for it.')
+                wake_enabled = servers is None and bool(os.getenv("PC_MAC_ADDRESS", "").strip())
                 if wake_enabled:
                     tools.append(deepcopy(WAKE_DEFINITION))
                 unavailable = ", ".join(sorted(registry.unavailable)) or "none"
                 prefix[0]["content"] += f"\nCurrently unavailable MCP servers: {unavailable}."
-                reply = await self._iterate(prefix, current, tools, registry, wake_enabled, execution)
+                reply = await self._iterate(prefix, current, tools, registry, wake_enabled, execution,
+                    allowed_tools=None if servers is None else {tool['function']['name'] for tool in tools})
         except ModelError as error:
             execution["status"] = "failed"
             execution["error"] = str(error)[:512]
@@ -202,7 +212,7 @@ class Agent:
                 return False
         return not pending
 
-    async def _iterate(self, prefix, current, tools, registry, wake_enabled, execution):
+    async def _iterate(self, prefix, current, tools, registry, wake_enabled, execution, *, allowed_tools=None):
         total, images_used, used_ids = 0, 0, set()
         for _ in range(self.config.max_rounds):
             self.model_request_attempts += 1
@@ -245,6 +255,16 @@ class Agent:
                     parsed.append((call_id, name, arguments))
                 except (KeyError, TypeError, ValueError):
                     raise ModelError("Cloud model returned invalid or repeated tool calls; no new action sent.") from None
+            if allowed_tools is not None and any(name not in allowed_tools for _, name, _ in parsed):
+                for call_id, name, _ in parsed:
+                    execution['records'].append(ToolExecutionRecord(call_id, name[:128],
+                        'not_started' if name in allowed_tools else 'rejected'))
+                execution['status'] = 'failed'
+                execution['error'] = 'The model requested a tool outside this command\'s allowed scope.'
+                # Reject the whole proposed batch, including any allowed call
+                # preceding the forbidden one. No side effect from it has begun.
+                return self._partial_reply(execution, execution['error'] +
+                    ' No actions in that batch were sent. Please repeat the target.')
             current.append({"role": "assistant", "content": content, "tool_calls": calls, **metadata})
             image_messages, stopped = [], None
             for call_id, name, arguments in parsed:

@@ -50,6 +50,33 @@ BOUNDARY = re.compile(
     rf'(?=(?:please\s+)?{VERBS}\b)', re.IGNORECASE)
 CONNECTOR_WORD = re.compile(r'\b(?:and|then)\b|;', re.IGNORECASE)
 WAKE_PREFIX = re.compile(r'^\s*(?:hey\s+athena|athena)\b[\s,.:!]*', re.IGNORECASE)
+HA_HINT = re.compile(r'\b(?:lights?|lamps?|fans?|thermostat|nanoleafs?|nanoleaves|'
+                     r'table glow|under ?glow|bathroom|bedroom)\b')
+PC_HINT = re.compile(r'\b(?:pc|computer|desktop|windows|notepad|screen|screenshot|'
+                     r'monitor|apps?|applications?|programs?|projects?|files?|folders?|'
+                     r'browser|chrome|edge|discord|steam|powershell|scripts?)\b')
+
+
+def cloud_tool_servers(text):
+    """Bound an explicit HA request; mixed/other requests keep their capabilities.
+
+    This chooses tool access, never an action or a replacement target. A model
+    may interpret a light request, but it cannot explore Windows to resolve it.
+    """
+    normalized = normalize_command(text)
+    if HA_HINT.search(normalized) and not PC_HINT.search(normalized):
+        return frozenset({'ha'})
+    return None
+
+
+def _unclear_switch_target(text):
+    normalized = normalize_command(text)
+    # Short, unqualified switch requests cannot identify their domain. Do not
+    # let a misheard proper noun expand into unrelated application discovery.
+    return (re.fullmatch(r'(?:(?:can|could|would) you )?(?:please )?'
+                         r'(?:turn|switch) (?:on|off) (?:the )?'
+                         r'[a-z]+(?: [a-z]+){0,2}', normalized) is not None
+            and not HA_HINT.search(normalized) and not PC_HINT.search(normalized))
 
 
 def _span(text, start, end):
@@ -96,6 +123,10 @@ def plan_command(text, *, request_id=None):
     body = text[start:end]
     if not normalize_command(body):
         return whole('clarify', 'empty_or_wake_only')
+    if re.match(r'^(?:and|then)\b', normalize_command(body)):
+        return whole('clarify', 'incomplete_command')
+    if re.match(r'^(?:on|off)\b', normalize_command(body)) and HA_HINT.search(normalize_command(body)):
+        return whole('clarify', 'incomplete_command')
     reason = _scope_reason(application_scope_view(body))
     if reason:
         return whole('contextual', reason)
@@ -127,7 +158,8 @@ def plan_command(text, *, request_id=None):
                 route, reason = 'clarify', 'ambiguous_registered_target'
             except UnknownCommand:
                 action = None
-                route, reason = 'contextual', 'unresolved_command_or_target'
+                route, reason = (('clarify', 'unresolved_switch_target') if _unclear_switch_target(source)
+                                 else ('contextual', 'unresolved_command_or_target'))
         dependencies = (steps[-1].step_id,) if steps and connector in {'then', 'and then'} else ()
         steps.append(PlanStep(f'{request_id}:{index}', left, right, source, route, reason,
                               action, connector, dependencies))

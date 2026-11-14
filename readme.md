@@ -9,6 +9,9 @@ commands such as “turn on nanoleafs and open Notepad.” Broader application
 discovery and graceful closing are planned. Voice recognition is still being
 improved; responses currently appear as text.
 
+Unclear switch targets and incomplete commands ask for clarification. Explicit
+light requests that need the model use HA tools; mixed PC/HA requests retain both.
+
 ## Setup
 
 From the Pi checkout:

@@ -184,6 +184,10 @@ class RequestDispatcher:
         if trace['route'] == 'clarify':
             record.status = trace['outcome'] = 'clarification'
             record.reply = ('Please use at most three actions.' if trace['reason'] == 'compound_step_limit'
+                else 'Which device should I turn on or off? Please repeat its full name.'
+                    if trace['reason'] == 'unresolved_switch_target'
+                else 'Please repeat the complete command, including its action and target.'
+                    if trace['reason'] == 'incomplete_command'
                 else 'Please repeat the full target name.' if trace['reason'] == 'ambiguous_registered_target'
                 else 'Please say a command.')
             return record.reply

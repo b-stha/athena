@@ -137,6 +137,45 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await agent.turn("hello"), "Hello")
         self.assertEqual(registry.calls, [])
 
+    async def test_light_request_discovers_only_ha_and_blocks_windows_batch_before_effects(self):
+        seen = []
+        registry = FakeRegistry(None)
+        registry.definitions = lambda: [
+            {'type': 'function', 'function': {'name': name, 'parameters': {'type': 'object'}}}
+            for name in ('ha__switch', 'windows__PowerShell')]
+        model = FakeModel([{'role': 'assistant', 'tool_calls': [
+            call(), call('windows__PowerShell', {'command': 'Get-StartApps'}, 'other')]}])
+        settings = config(servers=(ServerConfig('ha', 'http://ha/mcp', 'ha-key'),
+                                   ServerConfig('windows', 'http://pc/mcp', 'windows-key')))
+        def factory(selected):
+            seen.append(selected)
+            return registry
+        agent = Agent(settings, model=model, registry_factory=factory)
+        self.addAsyncCleanup(agent.close)
+        with patch.dict(os.environ, {'PC_MAC_ADDRESS': '00:11:22:33:44:55'}):
+            reply = await agent.turn('dim the Nanoleafs lights')
+        self.assertEqual([server.name for server in seen[0].servers], ['ha'])
+        self.assertEqual([tool['function']['name'] for tool in model.requests[0][1]], ['ha__switch'])
+        self.assertEqual(registry.calls, [])
+        self.assertIn('allowed scope', reply)
+        self.assertEqual([record.status for record in agent.last_execution.tool_records],
+                         ['not_started', 'rejected'])
+        self.assertTrue(agent._complete_tool_history(agent.history['default'][0]))
+
+    async def test_mixed_ha_and_pc_request_keeps_both_server_catalogs(self):
+        seen = []
+        registry = FakeRegistry(None)
+        model = FakeModel([{'role': 'assistant', 'content': 'Please specify the project.'}])
+        settings = config(servers=(ServerConfig('ha', 'http://ha/mcp', 'ha-key'),
+                                   ServerConfig('windows', 'http://pc/mcp', 'windows-key')))
+        def factory(selected):
+            seen.append(selected)
+            return registry
+        agent = Agent(settings, model=model, registry_factory=factory)
+        self.addAsyncCleanup(agent.close)
+        await agent.turn('turn on Nanoleafs and open my most recent project')
+        self.assertEqual({server.name for server in seen[0].servers}, {'ha', 'windows'})
+
     async def test_uncertain_execution_stops_batch_without_retries(self):
         agent, model, registry = self.make_agent([{"role": "assistant", "content": None, "tool_calls": [
             call(), call(call_id="call-2")]}])

@@ -99,6 +99,24 @@ class PlanningTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.plan(text).steps[0].route, 'clarify')
 
+    def test_misheard_switch_target_and_incomplete_speech_require_clarification(self):
+        for text, reason in [('Turn on the Analyse.', 'unresolved_switch_target'),
+                             ('switch off something', 'unresolved_switch_target'),
+                             ('And put on Nanoleaves.', 'incomplete_command'),
+                             ('On Nanoleafs.', 'incomplete_command')]:
+            with self.subTest(text=text):
+                step, = self.plan(text).steps
+                self.assertEqual((step.route, step.reason, step.action), ('clarify', reason, None))
+
+    def test_unclear_target_in_compound_prevents_partial_execution(self):
+        plan = self.plan('turn on nanoleafs and turn off the Analyse')
+        self.assertEqual([step.route for step in plan.steps], ['local', 'clarify'])
+
+    def test_unregistered_explicit_light_and_contextual_pc_requests_can_use_the_model(self):
+        for text in ('turn on the kitchen lights', 'turn on my PC', 'open my most recent project'):
+            with self.subTest(text=text):
+                self.assertNotEqual(self.plan(text).steps[0].route, 'clarify')
+
     def test_limits_reject_invalid_requests_and_bound_step_count(self):
         for text in (None, 12, 'x' * 8001):
             with self.subTest(text=text if not isinstance(text, str) else 'overlong'):

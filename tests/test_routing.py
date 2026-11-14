@@ -36,6 +36,18 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(event.elapsed_ms, 0)
         self.assertIs(dispatcher.last_route_event, event)
 
+    async def test_bad_transcripts_cannot_initialize_cloud_or_operate_devices(self):
+        for text in ('Turn on the Analyse.', 'And put on Nanoleaves.', 'On Nanoleafs.',
+                     'turn on nanoleafs and turn off the Analyse'):
+            with self.subTest(text=text):
+                dispatcher = self.make()
+                dispatcher.agent_factory = lambda: self.fail('Clarification must not initialize a model')
+                reply = await dispatcher.turn(text)
+                self.assertIn('repeat', reply.casefold())
+                event = self.events[-1]
+                self.assertEqual((event.route, event.model_request_attempts, event.local_action_attempts),
+                                 ('clarify', 0, 0))
+
     async def test_policy_reasons_differentiate_disabled_mixed_scope_and_backend(self):
         for text, enabled, expected in [
             ('turn on bathroom', False, 'local_ha_disabled'),
