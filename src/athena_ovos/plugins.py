@@ -5,9 +5,11 @@ only supply mono microphone chunks and transcribe the recording OVOS provides.
 """
 
 import asyncio
+import json
 import math
 import os
 import sys
+import time
 from array import array
 from dataclasses import dataclass, field
 from queue import Empty, Full, Queue
@@ -149,6 +151,21 @@ def normalize_audio(audio):
     return normalized.tobytes()
 
 
+def audio_levels(audio):
+    """Describe original PCM levels without retaining speech or changing gain."""
+    samples = array('h')
+    samples.frombytes(audio)
+    if sys.byteorder != 'little':
+        samples.byteswap()
+    peak = max((abs(sample) for sample in samples), default=0)
+    rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples)) if samples else 0
+    return {'audio_seconds': round(len(samples) / SAMPLE_RATE, 3),
+            'peak_dbfs': round(20 * math.log10(peak / 32768), 2) if peak else None,
+            'rms_dbfs': round(20 * math.log10(rms / 32768), 2) if rms else None,
+            'normalization_gain': round(TARGET_PEAK / peak, 3) if peak else 1,
+            'clipped_samples': sum(abs(sample) >= 32767 for sample in samples)}
+
+
 async def _transcribe(audio, uri, language, connect_timeout):
     async with AsyncClient.from_uri(uri, connect_timeout=connect_timeout) as client:
         await client.write_event(Transcribe(language=language).event())
@@ -177,6 +194,10 @@ class AthenaWhisperSTT(STT):
         self.uri = self.config.get("uri") or os.getenv("WHISPER_URI", "tcp://127.0.0.1:10300")
         self.timeout = float(self.config.get("timeout", 30))
         self.connect_timeout = float(self.config.get("connect_timeout", 5))
+        diagnostics = os.getenv('ATHENA_STT_DIAGNOSTICS', 'false').strip().casefold()
+        if diagnostics not in {'true', 'false'}:
+            raise ValueError('ATHENA_STT_DIAGNOSTICS must be true or false.')
+        self.diagnostics = diagnostics == 'true'
         if (isinstance(self.config.get("timeout"), bool)
                 or isinstance(self.config.get("connect_timeout"), bool)
                 or not all(math.isfinite(value) and value > 0
@@ -209,9 +230,18 @@ class AthenaWhisperSTT(STT):
                 timeout=self.timeout,
             )
 
+        started = time.monotonic()
+        status = 'failed'
         try:
-            return asyncio.run(request())
+            text = asyncio.run(request())
+            status = 'returned' if text else 'empty'
+            return text
         except TimeoutError as error:
             raise RuntimeError(f"Whisper transcription timed out after {self.timeout:g} seconds.") from error
         except OSError as error:
             raise RuntimeError("Cannot reach Whisper. Check the service and WHISPER_URI.") from error
+        finally:
+            if self.diagnostics:
+                print('[athena.stt] ' + json.dumps({**audio_levels(pcm), 'status': status,
+                    'elapsed_ms': round((time.monotonic() - started) * 1000, 3)}),
+                    file=sys.stderr, flush=True)

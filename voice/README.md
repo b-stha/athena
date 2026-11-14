@@ -221,7 +221,7 @@ command using WebRTC VAD. Its initial settings are:
 | Setting | Value |
 | --- | --- |
 | Minimum speech to begin a command | 0.1 seconds |
-| Silence to finish a command | 0.8 seconds |
+| Silence to finish a command | 2 seconds |
 | Maximum wait for speech after the wake word | 5 seconds |
 | Maximum recording duration | 30 seconds |
 | Audio retained around wake detection | 200 ms |
@@ -242,6 +242,12 @@ The microphone plugin supplies audio throughout the listener's lifecycle. Its
 bounded queue retains recent audio while OVOS is busy transcribing. OVOS owns
 the command buffer and decides when to start and finish recording; Athena does
 not run a second microphone recorder.
+
+For distance checks, enable `ATHENA_STT_DIAGNOSTICS=true`. Each transcription logs
+the original recording's duration, peak/RMS levels, normalization gain, clipping
+count, and STT time as `[athena.stt]`. It saves no audio and does not change wake
+sensitivity or input gain. Compare normal speech at the desk and intended bed
+position before changing microphone or VAD settings.
 
 `athena_ovos.plugins.AthenaWhisperSTT` receives the completed OVOS recording,
 converts it to 16 kHz, signed 16-bit mono and peak-normalizes it to -1 dBFS before

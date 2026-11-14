@@ -1,4 +1,6 @@
 import asyncio
+import io
+import json
 import struct
 import threading
 import unittest
@@ -168,6 +170,36 @@ class WhisperSTTTests(unittest.TestCase):
         self.assertEqual(struct.unpack("<4h", payload),
                          (plugins.TARGET_PEAK, -round(plugins.TARGET_PEAK / 2),
                           round(plugins.TARGET_PEAK / 4), 0))
+
+    def test_diagnostics_measure_input_without_recording_or_changing_the_transcript(self):
+        pcm = struct.pack('<4h', 1000, -1000, 1000, -1000)
+        output = io.StringIO()
+        self.engine.diagnostics = True
+        with patch('sys.stderr', output):
+            self.assertEqual(self.engine.execute(AudioData(pcm, 16000, 2)), 'Open Notepad.')
+        line, = [line for line in output.getvalue().splitlines() if line.startswith('[athena.stt] ')]
+        event = json.loads(line.removeprefix('[athena.stt] '))
+        self.assertAlmostEqual(event['peak_dbfs'], -30.31, places=2)
+        self.assertAlmostEqual(event['rms_dbfs'], -30.31, places=2)
+        self.assertEqual(event['clipped_samples'], 0)
+        self.assertEqual(event['status'], 'returned')
+        self.assertGreaterEqual(event['elapsed_ms'], 0)
+        self.assertNotIn('Notepad', output.getvalue())
+        silent = plugins.audio_levels(b'\0' * 640)
+        self.assertIsNone(silent['peak_dbfs'])
+        self.assertIsNone(silent['rms_dbfs'])
+        self.assertEqual(silent['audio_seconds'], 0.02)
+
+    def test_diagnostics_preserve_connection_failure_and_are_explicitly_enabled(self):
+        self.engine.diagnostics = True
+        self.client.__aenter__.side_effect = ConnectionRefusedError()
+        output = io.StringIO()
+        with patch('sys.stderr', output), self.assertRaisesRegex(RuntimeError, 'Cannot reach Whisper'):
+            self.engine.execute(AudioData(b'\0\0', 16000, 2))
+        line, = [line for line in output.getvalue().splitlines() if line.startswith('[athena.stt] ')]
+        self.assertEqual(json.loads(line.split(' ', 1)[1])['status'], 'failed')
+        with patch.dict('os.environ', {'ATHENA_STT_DIAGNOSTICS': 'maybe'}), self.assertRaises(ValueError):
+            plugins.AthenaWhisperSTT({'lang': 'en-US'})
 
     def test_listener_stream_wrapper_delivers_recording_to_whisper(self):
         wrapper = FakeStreamingSTT(self.engine, {"lang": "en-US"})
