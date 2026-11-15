@@ -255,6 +255,31 @@ sending Wyoming transcription events. It requests English, connects within
 five seconds and limits each transcription request to 30 seconds by default.
 Disconnects, server errors and timeouts are reported as failures.
 
+Before starting the listener, the provisioned service can prime its speech server:
+
+```bash
+./run.sh --warmup-stt --stt-timeout 15
+```
+
+This sends one second of synthetic silence and discards any returned text. It
+opens no microphone and dispatches no command. The speech server retains its
+loaded model; warm-up prepares startup, while audio quality and decoder work can
+still change the time needed for a real command.
+
+The [speech image](whisper/Dockerfile) adds an opt-in single-pass decoding setting
+to a pinned upstream image. Its [settings example](whisper/runtime.env.example)
+uses four CPU threads, int8 inference and beam size 3. Single-pass decoding avoids
+Whisper's progressively hotter sampling retries; unclear transcripts still need
+clarification. It also honors the model's no-speech flag without overriding it
+with a confident prompt-biased transcript. Set `ATHENA_WHISPER_SINGLE_PASS=false`
+to restore upstream retries and confidence behavior. Completely silent 16-bit
+PCM is rejected even if the model invents text; this adds no volume threshold.
+The build checks the upstream source hash and stops if it has changed. Offline
+mode requires the model and fallback tokenizer to be cached first. The tokenizer
+cache belongs in the persistent data volume; keep existing HA name-bias settings.
+On a new installation, start once with `HF_HUB_OFFLINE=0` to populate both caches,
+then switch it to `1`. Build the image from `voice/whisper/` using its Dockerfile.
+
 OVOS pauses wake detection while waiting for transcription. When transcription
 fails or returns no text, the terminal reports that you can try again and OVOS
 returns to wake detection. The deadline starts after recording, so the time

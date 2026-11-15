@@ -216,6 +216,23 @@ class AthenaWhisperSTT(STT):
     def available_languages(cls):
         return {"en", "en-US", "en-GB", "en-AU", "en-CA"}
 
+    def warm_up(self):
+        """Prime the speech server with synthetic silence; discard all text."""
+        async def request():
+            await asyncio.wait_for(
+                _transcribe(bytes(SAMPLE_RATE * SAMPLE_WIDTH), self.uri, "en", self.connect_timeout),
+                timeout=self.timeout,
+            )
+
+        started = time.monotonic()
+        try:
+            asyncio.run(request())
+        except TimeoutError as error:
+            raise RuntimeError("Speech server warm-up timed out.") from error
+        except OSError as error:
+            raise RuntimeError("Cannot reach the speech server for warm-up.") from error
+        return time.monotonic() - started
+
     def execute(self, audio, language=None):
         pcm = audio.get_raw_data(convert_rate=SAMPLE_RATE, convert_width=SAMPLE_WIDTH)
         if not pcm:

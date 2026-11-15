@@ -160,6 +160,26 @@ class WhisperSTTTests(unittest.TestCase):
         self.assertEqual(b"".join(event.payload for event in events[2:4]), b"\0" * 6400)
         self.client.__aexit__.assert_awaited_once()
 
+    def test_warmup_uses_only_synthetic_silence_and_discards_transcribed_commands(self):
+        self.client.read_event.return_value = Transcript("Turn off Nanoleafs.").event()
+        elapsed = self.engine.warm_up()
+        self.assertIsInstance(elapsed, float)
+        self.assertGreaterEqual(elapsed, 0)
+        events = [call.args[0] for call in self.client.write_event.call_args_list]
+        self.assertEqual(events[0].data["language"], "en")
+        payload = b"".join(event.payload for event in events if event.type == "audio-chunk")
+        self.assertEqual(payload, bytes(32000))
+        self.client.__aexit__.assert_awaited_once()
+
+    def test_warmup_timeout_is_bounded_and_closes_the_connection(self):
+        self.engine.timeout = 0.02
+        async def stalled():
+            await asyncio.sleep(10)
+        self.client.read_event.side_effect = stalled
+        with self.assertRaisesRegex(RuntimeError, "warm-up timed out"):
+            self.engine.warm_up()
+        self.client.__aexit__.assert_awaited_once()
+
     def test_recording_is_converted_before_peak_normalization(self):
         audio = MagicMock()
         audio.get_raw_data.return_value = struct.pack("<4h", 1000, -500, 250, 0)

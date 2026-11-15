@@ -1,6 +1,7 @@
 """Runtime checks use real OVOS configuration and harmless child processes."""
 
 import json
+import io
 import os
 from pathlib import Path
 import signal
@@ -270,6 +271,22 @@ while True:
         process.wait(timeout=3)
         with self.assertRaisesRegex(RuntimeError, r"listener exited unexpectedly \(0\)"):
             _check_processes([("listener", process)])
+
+
+class SpeechWarmupCliTests(unittest.TestCase):
+    def test_warmup_exits_without_starting_voice_or_dispatching_returned_text(self):
+        import main as entrypoint
+        output = io.StringIO()
+        with patch.object(sys, 'argv', ['athena', '--warmup-stt', '--stt-timeout', '12']), \
+                patch('athena_ovos.plugins.AthenaWhisperSTT') as factory, \
+                patch('athena_ovos.runtime.prepare_environment', side_effect=AssertionError('No voice setup')), \
+                patch('athena_agent.dispatcher.RequestDispatcher', side_effect=AssertionError('No commands')), \
+                patch('sys.stdout', output):
+            factory.return_value.warm_up.return_value = 1.25
+            self.assertEqual(entrypoint.main(), 0)
+        factory.assert_called_once_with({'timeout': 12, 'lang': 'en-US'})
+        factory.return_value.warm_up.assert_called_once_with()
+        self.assertIn('warmed up in 1.25s', output.getvalue())
 
 
 if __name__ == "__main__":

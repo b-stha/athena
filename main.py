@@ -66,6 +66,8 @@ def main():
     modes.add_argument("--legacy-text", action="store_true", help="standalone diagnostics: HA MCP, Wake-on-LAN, historical Desktop HTTP")
     modes.add_argument("--check-agent-config", action="store_true", help="validate model/MCP settings without connecting")
     modes.add_argument("--check-local-config", action="store_true", help="validate deterministic HA MCP settings without connecting")
+    modes.add_argument("--warmup-stt", action="store_true",
+                       help="prime the local speech server without microphone capture or command execution")
     parser.add_argument("--wake-engine", choices=("custom", "precise"),
                         default=os.getenv("ATHENA_WAKE_ENGINE", "custom"),
                         help="wake detector (default: custom trained openWakeWord model)")
@@ -99,6 +101,11 @@ def main():
         raise KeyboardInterrupt
     previous = signal.signal(signal.SIGTERM, stop)
     try:
+        if args.warmup_stt:
+            from athena_ovos.plugins import AthenaWhisperSTT
+            elapsed = AthenaWhisperSTT({"timeout": args.stt_timeout, "lang": "en-US"}).warm_up()
+            print(f"Speech server warmed up in {elapsed:.2f}s. No microphone capture or device action was made.")
+            return 0
         if args.legacy_text:
             return legacy_text_mode()
         if args.check_local_config:
