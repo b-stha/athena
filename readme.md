@@ -4,9 +4,10 @@ Athena runs on a Raspberry Pi and controls Home Assistant and Windows through
 voice or text. Familiar commands can run without a model request; contextual
 requests use a cloud model and MCP tools.
 
-Current support includes light controls, Notepad launching, and short compound
-commands such as “turn on nanoleafs and open Notepad.” Broader application
-discovery and graceful closing are planned. Voice recognition is still being
+Current support includes light controls, opening registered Windows apps, and
+short compound commands such as “turn on nanoleafs and open Notepad.” Windows
+supplies the application catalog; the Pi caches and matches its names without a
+model request. Graceful closing is planned. Voice recognition is still being
 improved; responses currently appear as text.
 
 Unclear switch targets and incomplete commands ask for clarification. Explicit
@@ -29,6 +30,9 @@ model configuration.
 
 Enable model-free registered commands with `ATHENA_LOCAL_HA_ENABLED=true` and
 `ATHENA_LOCAL_APPS_ENABLED=true` in `.env`.
+Application discovery requires Athena Desktop's MCP extension. Older Windows-MCP
+setups retain the previous Notepad-only path. Ambiguous app names ask for
+clarification; unavailable or stale catalogs do not trigger an automatic retry.
 
 ## Use
 

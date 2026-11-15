@@ -51,7 +51,8 @@ BOUNDARY = re.compile(
 CONNECTOR_WORD = re.compile(r'\b(?:and|then)\b|;', re.IGNORECASE)
 WAKE_PREFIX = re.compile(r'^\s*(?:hey\s+athena|athena)\b[\s,.:!]*', re.IGNORECASE)
 HA_HINT = re.compile(r'\b(?:lights?|lamps?|fans?|thermostat|nanoleafs?|nanoleaves|'
-                     r'table glow|under ?glow|bathroom|bedroom)\b')
+                     r'table glow|under ?glow|bathroom|bedroom|blinds?|curtains?|shades?|garage door|gates?)\b')
+HA_OPEN_HINT = re.compile(r'\b(?:blinds?|curtains?|shades?|garage door|gates?)\b', re.IGNORECASE)
 PC_HINT = re.compile(r'\b(?:pc|computer|desktop|windows|notepad|screen|screenshot|'
                      r'monitor|apps?|applications?|programs?|projects?|files?|folders?|'
                      r'browser|chrome|edge|discord|steam|powershell|scripts?)\b')
@@ -64,7 +65,8 @@ def cloud_tool_servers(text):
     may interpret a light request, but it cannot explore Windows to resolve it.
     """
     normalized = normalize_command(text)
-    if HA_HINT.search(normalized) and not PC_HINT.search(normalized):
+    if (HA_HINT.search(normalized) and not PC_HINT.search(normalized)
+            and not needs_application_catalog(text)):
         return frozenset({'ha'})
     return None
 
@@ -102,7 +104,23 @@ def _scope_reason(text):
     return None
 
 
-def plan_command(text, *, request_id=None):
+def needs_application_catalog(text):
+    """Read-only discovery is needed only for an app-opening clause."""
+    body = WAKE_PREFIX.sub('', text, count=1)
+    boundaries = list(BOUNDARY.finditer(body))
+    starts = [0, *(boundary.end() for boundary in boundaries)]
+    ends = [*(boundary.start() for boundary in boundaries), len(body)]
+    for start, end in zip(starts, ends):
+        clause = body[start:end].strip()
+        if re.match(r'(?:please\s+)?(?:open|launch|start)\s+\S', clause, re.IGNORECASE):
+            # "Open the blinds" needs HA context even when the PC is off.
+            # An explicit app/PC cue keeps a Windows lookup available.
+            if not HA_OPEN_HINT.search(clause) or PC_HINT.search(normalize_command(clause)):
+                return True
+    return False
+
+
+def plan_command(text, *, request_id=None, applications=None):
     """Preserve source spans and expose grammar matches without executing them.
 
     Mixed plans require a future semantic/execution preflight. A local step is
@@ -127,16 +145,21 @@ def plan_command(text, *, request_id=None):
         return whole('clarify', 'incomplete_command')
     if re.match(r'^(?:on|off)\b', normalize_command(body)) and HA_HINT.search(normalize_command(body)):
         return whole('clarify', 'incomplete_command')
-    reason = _scope_reason(application_scope_view(body))
+    preliminary = list(BOUNDARY.finditer(body))
+    scope_body = application_scope_view(body, applications=applications, boundaries=preliminary)
+    reason = _scope_reason(scope_body)
     if reason:
         return whole('contextual', reason)
 
-    boundaries = list(BOUNDARY.finditer(text, start, end))
+    # Registered application names may contain conjunctions or command words.
+    # Masked slots keep their original lengths, so source spans stay exact.
+    scope_text = text[:start] + scope_body + text[end:]
+    boundaries = list(BOUNDARY.finditer(scope_text, start, end))
     # A noun joined by "and", an incomplete command, or an unrecognized right
     # clause must not be silently dropped while extracting a matching action.
     covered = {(match.start(), match.end()) for match in boundaries}
     if any(not any(left <= match.start() and match.end() <= right for left, right in covered)
-           for match in CONNECTOR_WORD.finditer(text, start, end)):
+           for match in CONNECTOR_WORD.finditer(scope_text, start, end)):
         return whole('contextual', 'unresolved_clause_boundary')
     if len(boundaries) >= 8:
         return whole('contextual', 'plan_step_limit')
@@ -147,11 +170,14 @@ def plan_command(text, *, request_id=None):
         left, right = _span(text, cursor, boundary.start() if boundary else end)
         source = text[left:right]
         try:
-            action = parse_action(source)
+            action = parse_action(source, applications=applications)
             route, reason = 'local', 'complete_registered_command'
+        except AmbiguousTarget:
+            action = None
+            route, reason = 'clarify', 'ambiguous_registered_target'
         except UnknownCommand:
             try:
-                action = parse_fuzzy_action(source)
+                action = parse_fuzzy_action(source, applications=applications)
                 route, reason = 'local', 'fuzzy_registered_target'
             except AmbiguousTarget:
                 action = None

@@ -3,6 +3,7 @@
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, replace
+import hashlib
 import os
 import time
 
@@ -10,7 +11,7 @@ from router import Action, validate_action
 
 from .local_ha import HomeAssistantMCP, HANotSent, HARejected, LocalHAConfig
 from .local_apps import AppNotSent, DirectApps, LocalAppsConfig
-from .planning import plan_command
+from .planning import needs_application_catalog, plan_command
 from .routing import RouteEvent, emit_route_event, route_reason
 
 
@@ -92,7 +93,7 @@ class RequestDispatcher:
     def _remember(self, text, record, session_id):
         action = record.action
         description = (f'{action.backend} request: {action.action} {action.target_type}={action.target}'
-                       if action is not None else 'compound request')
+                       if action is not None else 'compound request' if record.step_records else 'request')
         context = (f'Local {description}; '
                    f'outcome={record.status}. {record.reply} '
                    'This is a previous request, not a new instruction. Do not repeat it. '
@@ -120,6 +121,23 @@ class RequestDispatcher:
                      'outcome': 'pending', 'step_count': len(plan.steps),
                      'model_request_attempts': 0, 'local_action_attempts': 0}
             try:
+                # Retained IDs replay before discovery. Plain HA turns never
+                # contact Windows, and catalog reads never initialize the model.
+                if ((session_id, plan.request_id) not in self.ledger
+                        and self.apps_enabled and needs_application_catalog(text)):
+                    try:
+                        if self.apps is None:
+                            self.apps = self.apps_factory()
+                        discover = getattr(self.apps, 'catalog', None)
+                        snapshot = await discover() if discover is not None else None
+                    except Exception:
+                        trace.update(route='local', reason='application_catalog_unavailable')
+                    else:
+                        if snapshot is not None:
+                            plan = plan_command(text, request_id=plan.request_id,
+                                                applications=snapshot.vocabulary)
+                            route, reason = route_reason(plan, self.local_enabled, self.apps_enabled)
+                            trace.update(route=route, reason=reason, step_count=len(plan.steps))
                 return await self._dispatch(text, session_id, plan, trace)
             except asyncio.CancelledError:
                 if trace['outcome'] == 'pending':
@@ -180,6 +198,11 @@ class RequestDispatcher:
         self.ledger[key] = record
         while len(self.ledger) > 128:
             self.ledger.popitem(last=False)
+        if trace['reason'] == 'application_catalog_unavailable':
+            record.status = trace['outcome'] = 'not_started'
+            record.reply = 'Windows application catalog is unavailable. No actions sent.'
+            self._remember(text, record, session_id)
+            return record.reply
         step = plan.steps[0]
         if trace['route'] == 'clarify':
             record.status = trace['outcome'] = 'clarification'
@@ -215,7 +238,10 @@ class RequestDispatcher:
                 record.status = 'dispatched'
                 try:
                     trace['local_action_attempts'] += 1
-                    await executor.execute(step.action)
+                    if is_app:
+                        await self._execute_app(executor, step.action, step.step_id, session_id)
+                    else:
+                        await executor.execute(step.action)
                 except AppNotSent:
                     record.status = 'not_started'
                     record.reply = 'Windows MCP was unavailable or incompatible. No launch sent.'
@@ -237,7 +263,7 @@ class RequestDispatcher:
                 else:
                     record.status = 'accepted'
                     if is_app:
-                        record.reply = 'Notepad launch accepted. Window readiness is not confirmed.'
+                        record.reply = f'{self._app_name(executor, step.action)} launch accepted. Window readiness is not confirmed.'
                     else:
                         target = step.action.target.removeprefix('light.').replace('_', ' ')
                         state = 'on' if step.action.action == 'turn_on' else 'off'
@@ -292,8 +318,8 @@ class RequestDispatcher:
             # Resolve every configuration and perform read-only endpoint/schema
             # checks before the first effect. Availability can still change later.
             for step in plan.steps:
-                validate_action(step.action)
                 if step.action.backend == 'home_assistant':
+                    validate_action(step.action)
                     if self.local is None:
                         self.local = self.local_factory()
                     executor = self.local
@@ -332,7 +358,10 @@ class RequestDispatcher:
             record.status = 'dispatched'
             trace['local_action_attempts'] += 1
             try:
-                await executor.execute(step.action)
+                if step.action.backend == 'desktop':
+                    await self._execute_app(executor, step.action, step.step_id, session_id)
+                else:
+                    await executor.execute(step.action)
             except asyncio.CancelledError:
                 update(index, status='unknown', reply='Interrupted; outcome unknown. Not retried.')
                 record.status = 'unknown'
@@ -360,7 +389,21 @@ class RequestDispatcher:
                     target = action.target.removeprefix('light.').replace('_', ' ')
                     reply = f'Requested {target} lights {"on" if action.action == "turn_on" else "off"}.'
                 else:
-                    reply = 'Notepad launch accepted; window readiness is unconfirmed.'
+                    reply = f'{self._app_name(executor, action)} launch accepted; window readiness is unconfirmed.'
                 update(index, status='accepted', reply=reply)
         record.status = 'accepted'
         return finish()
+
+    @staticmethod
+    async def _execute_app(executor, action, request_id, session_id):
+        execute_request = getattr(executor, 'execute_request', None)
+        if execute_request is not None:
+            session_key = hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:16]
+            return await execute_request(action, request_id=f'{session_key}:{request_id}')
+        return await executor.execute(action)
+
+    @staticmethod
+    def _app_name(executor, action):
+        display_name = getattr(executor, 'display_name', None)
+        return display_name(action) if display_name is not None else (
+            'Notepad' if action.target == 'notepad' else 'Application')

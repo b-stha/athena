@@ -71,12 +71,15 @@ class CommandTemplate:
     def pattern(self):
         return self.build_pattern()
 
-    def build_pattern(self, *, fuzzy=False):
-        vocabulary = r'[a-z]+(?: [a-z]+){0,2}?' if fuzzy else _alternatives(TARGET_VOCABULARY[self.target_kind])
+    def build_pattern(self, *, fuzzy=False, applications=None):
+        targets = (APPLICATIONS if applications is None else applications) if self.target_kind == "Application" else TARGET_VOCABULARY[self.target_kind]
+        vocabulary = r'[a-z]+(?: [a-z]+){0,2}?' if fuzzy else _alternatives(targets)
         target = rf"(?P<{self.target_slot}>{vocabulary})"
         prefix = r"(?:please )?"
         if self.target_kind == "Desktop":
             target = r"(?:(?:my|the) )?" + target
+        elif self.target_kind == "Application":
+            target = r"(?:the )?" + target
         elif self.target_kind == "Light":
             target = r"(?:the )?" + target
             if self.verb:
@@ -86,17 +89,32 @@ class CommandTemplate:
         # negation, conditionals and extra commands cannot execute.
         return rf"^{prefix}{verb}{target}{self.suffix}(?: please)?$"
 
-    def match(self, command, *, target_resolver=None):
-        match = re.fullmatch(self.build_pattern(fuzzy=target_resolver is not None), command)
+    def match(self, command, *, target_resolver=None, applications=None):
+        match = re.fullmatch(self.build_pattern(fuzzy=target_resolver is not None,
+                                              applications=applications), command)
         if match is None:
             return None
         spoken_target = match.group(self.target_slot)
+        if self.target_kind == "Application":
+            vocabulary = APPLICATIONS if applications is None else applications
+            if target_resolver is not None:
+                # Fuzzy speech slots contain words only. Symbol/number-qualified
+                # names need an exact or spoken alias; an unspoken "++" must
+                # not become a competing correction for ordinary Notepad.
+                vocabulary = {name: target for name, target in vocabulary.items()
+                              if re.fullmatch(r'[a-z]+(?: [a-z]+){0,2}', name)}
+            target = (target_resolver(spoken_target, vocabulary) if target_resolver is not None
+                      else vocabulary[spoken_target])
+            if isinstance(target, tuple):
+                if len(target) != 1:
+                    from resolver import AmbiguousTarget
+                    raise AmbiguousTarget('Multiple Windows applications share that name.')
+                target = target[0]
+            return Action("desktop", self.action, target, "application")
         if target_resolver is not None:
             spoken_target = target_resolver(spoken_target, TARGET_VOCABULARY[self.target_kind])
         if self.target_kind == "Desktop":
             return Action("desktop", self.action, DESKTOP_TARGETS[spoken_target], "device")
-        if self.target_kind == "Application":
-            return Action("desktop", self.action, APPLICATIONS[spoken_target], "application")
         target_type, target = TARGETS[LIGHT_TARGETS[spoken_target]]
         return Action("home_assistant", self.action, target, target_type)
 
@@ -128,31 +146,57 @@ def is_explicit_light_request(command):
                and template.match(normalized) is not None for template in COMMAND_TEMPLATES)
 
 
-def parse_action(command):
+def parse_action(command, *, applications=None):
     """Recognize a complete command without performing any I/O."""
     normalized = normalize_command(command)
     if '?' in command and not (command.count('?') == 1 and command.rstrip().endswith('?')
                                and is_explicit_light_request(command)):
         raise UnknownCommand("A question must be resolved before choosing an action.")
-    matches = {action for template in COMMAND_TEMPLATES if (action := template.match(normalized)) is not None}
+    matches = {action for template in COMMAND_TEMPLATES
+               if (action := template.match(normalized, applications=applications)) is not None}
     if len(matches) != 1:
         raise UnknownCommand("Unknown or ambiguous command. Try: turn on nanoleafs or open notepad")
     return matches.pop()
 
 
-def application_scope_view(command):
-    """Exempt only the known app-slot mishearing 'no pad' from the 'no' guard.
+def application_scope_view(command, *, applications=None, boundaries=()):
+    """Mask only complete registered app slots, retaining every source offset.
 
-    Original text/spans are retained. This does not remove negation generally.
+    An app can be called "No Man's Sky" or contain "and". Scope words outside
+    its exact target slot still guard the entire request. No arbitrary text is
+    removed and trailing questions remain questions.
     """
-    view = ' '.join(command.casefold().split())
-    match = re.fullmatch(r'((?:please )?(?:open|launch|start) )no pad((?: please)?[.!]?)', view)
-    if match and APPLICATIONS.get('notepad') == 'notepad':
-        return match[1] + 'notepad' + match[2]
-    return command
+    vocabulary = APPLICATIONS if applications is None else applications
+    names = set(vocabulary)
+    if 'notepad' in names:
+        names.add('no pad')
+    if not names or len(boundaries) > 8:
+        return command
+    targets = _alternatives(names).replace(r'\ ', r'\s+')
+    pattern = re.compile(rf'(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?'
+                         rf'(?P<target>{targets})(?:\s+please)?[.!]?', re.IGNORECASE)
+    starts = [0, *(boundary.end() for boundary in boundaries)]
+    ends = [*(boundary.start() for boundary in boundaries), len(command)]
+    view = list(command)
+    for start in starts:
+        # Try the longest complete registered name before a shorter clause.
+        for end in reversed(ends):
+            if end <= start:
+                continue
+            left, right = start, end
+            while left < right and command[left].isspace():
+                left += 1
+            while right > left and command[right - 1].isspace():
+                right -= 1
+            match = pattern.fullmatch(command, left, right)
+            if match:
+                a, b = match.span('target')
+                view[a:b] = 'x' * (b - a)
+                break
+    return ''.join(view)
 
 
-def parse_fuzzy_action(command):
+def parse_fuzzy_action(command, *, applications=None):
     """Reuse exact command templates with bounded target-only corrections."""
     from resolver import AmbiguousTarget, resolve_target
     normalized = normalize_command(command)
@@ -163,7 +207,8 @@ def parse_fuzzy_action(command):
         if template.target_kind not in {'Light', 'Application'} or not template.verb:
             continue
         try:
-            action = template.match(normalized, target_resolver=resolve_target)
+            action = template.match(normalized, target_resolver=resolve_target,
+                                    applications=applications)
         except AmbiguousTarget:
             ambiguous = True
             continue
@@ -172,18 +217,21 @@ def parse_fuzzy_action(command):
         if action is not None:
             matches.add(action)
     if len(matches) == 1 and not ambiguous:
-        return validate_action(matches.pop())
+        return validate_action(matches.pop(), applications=applications)
     if ambiguous or len(matches) > 1:
         raise AmbiguousTarget('Please repeat the full target name.')
     raise UnknownCommand('No unambiguous registered fuzzy target.')
 
 
-def validate_action(action):
+def validate_action(action, *, applications=None):
     """Validate a structured action before any backend can execute it."""
     if not isinstance(action, Action):
         raise ValueError("Expected an Athena Action.")
     if action.backend == "desktop":
-        if action.action == "launch_app" and action.target_type == "application" and action.target in APPLICATIONS.values():
+        vocabulary = APPLICATIONS if applications is None else applications
+        app_ids = {app_id for value in vocabulary.values()
+                   for app_id in (value if isinstance(value, tuple) else (value,))}
+        if action.action == "launch_app" and action.target_type == "application" and action.target in app_ids:
             return action
         if action.action in {"wake", "shutdown", "restart", "sleep"} and action.target == "pc" and action.target_type == "device":
             return action

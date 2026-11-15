@@ -156,7 +156,7 @@ class HAMCPTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_compound_stops_after_ha_receipt_mismatch_without_model_or_windows_effect(self):
         peer = Peer(receipt(('Table glow',)))
-        windows = Mock()
+        windows = Mock(spec=['preflight', 'execute', 'close'])
         cloud = Mock(side_effect=AssertionError('No cloud permitted'))
         dispatcher = RequestDispatcher(local_enabled=True, apps_enabled=True, agent_factory=cloud,
             local_factory=lambda: self.backend(peer), apps_factory=lambda: windows, event_sink=lambda _: None)
