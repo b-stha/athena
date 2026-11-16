@@ -1,19 +1,19 @@
-# Integration adapters
+# Integration helpers
 
-Normal voice/text requests use the shared dispatcher and MCP executors.
-These small adapters remain for explicit `--legacy-text` diagnostics and
-Pi-native Wake-on-LAN.
+Normal voice and text commands use Athena's shared Home Assistant and Windows
+tools. This folder contains the small helpers for waking the PC and running
+the older text-only diagnostics.
 
-- `home_assistant.py` wraps the same HA MCP executor synchronously. It accepts
-  registered light actions using the `ha` server in `agent.local.json`;
-  `HA_URL` and `HA_TOKEN` are obsolete.
-- `desktop.py` supplies `wake_pc()` to the agent. Set `PC_MAC_ADDRESS` and,
-  optionally, `WOL_BROADCAST_ADDRESS` in `.env`. It sends one UDP magic packet;
-  acceptance does not confirm the PC has started.
-- Desktop HTTP requests are retained only for compatibility diagnostics against
-  old Desktop versions. Current Athena Desktop exposes MCP and cannot serve
-  those HTTP requests. Normal Windows control does not use this path.
+- `desktop.py` sends a Wake-on-LAN packet when asked to wake the PC.
+  Configure `PC_MAC_ADDRESS` and, if needed, `WOL_BROADCAST_ADDRESS` in `.env`.
+  Sending the packet does not confirm that the PC has started.
+- `home_assistant.py` sends supported light commands through the same
+  Home Assistant MCP connection used by normal commands. Configure the `ha`
+  connection in `agent.local.json`.
 
-See the [core guide](../../readme.md) and [configuration example](../../agent.example.json).
-Historical HTTP setup instructions are archived outside core under
-`athena_tools/history/`.
+The remaining Desktop HTTP calls are for testing old Desktop versions through
+`--legacy-text`. Current Athena Desktop uses Windows-MCP and does not serve
+those old requests. The old `HA_URL` and `HA_TOKEN` settings are no longer used.
+
+See the [main guide](../../readme.md) and
+[connection example](../../agent.example.json) for current setup.

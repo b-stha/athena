@@ -1,20 +1,36 @@
 # Athena
 
-Athena runs on a Raspberry Pi and controls Home Assistant and Windows through
-voice or text. Familiar commands can run without a model request; contextual
-requests use a cloud model and MCP tools.
+Athena is a voice and text assistant running on a Raspberry Pi. It controls
+Home Assistant lights and Windows applications. Familiar commands run without
+a cloud model; less familiar requests can ask a cloud model for help.
 
-Current support includes light controls, opening registered Windows apps, and
-short compound commands such as “turn on nanoleafs and open Notepad.” Windows
-supplies the application catalog; the Pi caches and matches its names without a
-model request. Registered apps can also receive normal window-close requests.
-Save prompts need user attention, and several matching windows require a choice.
-Voice recognition is still being improved; responses currently appear as text.
+## What works today
 
-Unclear switch targets and incomplete commands ask for clarification. Explicit
-light requests that need the model use HA tools; mixed PC/HA requests retain both.
+- Turn registered lights on and off.
+- Open apps using the names Windows provides.
+- Close app windows normally, leaving save prompts for you to answer.
+- Combine up to three supported commands, such as
+  `turn on nanoleafs and open Notepad`.
+- Wake a configured PC over the network.
+- Use cloud reasoning and, when needed, Windows screenshots for other requests.
+
+Voice replies currently appear as text in the terminal or service logs.
+Wake detection and transcription still make mistakes.
+
+## How it works
+
+Speech is turned into text on the Pi. Typed commands enter at the same point.
+Athena checks for a known command, then either runs it directly or asks the cloud
+model to interpret it.
+
+Both paths use the same Home Assistant and Windows connections. These use
+MCP, a standard way to make tools available to an assistant. The Pi chooses
+what to call; Athena Desktop keeps the Windows tools running.
 
 ## Setup
+
+The Pi needs Python 3.10 or newer, a microphone, the local Whisper speech
+service, and access to your Home Assistant and Windows tools.
 
 From the Pi checkout:
 
@@ -25,40 +41,51 @@ python3 -m venv .venv
 ```
 
 Copy `.env.example` to `.env` and `agent.example.json` to `agent.local.json`.
-Fill in your model connection, MCP tokens, and wake-model paths. Keep the local
-Whisper service running. See [voice setup](voice/README.md) for microphone and
-model configuration.
+Add your cloud model settings, connection tokens, and wake-model paths.
+Keep these private files out of Git.
 
-Enable model-free registered commands with `ATHENA_LOCAL_HA_ENABLED=true` and
-`ATHENA_LOCAL_APPS_ENABLED=true` in `.env`.
-Application discovery requires Athena Desktop's MCP extension. Older Windows-MCP
-setups retain the previous Notepad-only path. Ambiguous app names ask for
-clarification; unavailable or stale catalogs do not trigger an automatic retry.
-Personal nicknames may still need the model. Persistent nickname learning from
-verified app resolutions is planned; conversation history is not an alias registry.
+Set `ATHENA_LOCAL_HA_ENABLED=true` and `ATHENA_LOCAL_APPS_ENABLED=true`
+in `.env` to enable commands that run without the cloud model.
+See [voice setup](voice/README.md) and [Athena Desktop](https://github.com/b-stha/athena-desktop)
+for the remaining setup.
 
 ## Use
 
 ```bash
-./run.sh --text   # typed commands
-./run.sh          # voice commands
+./run.sh --text   # type commands
+./run.sh          # listen for voice commands
 ```
 
-Stop an existing voice listener before starting another. The provisioned Pi's
-`~/.local/bin/athena` launcher also loads its private secrets file.
+The already-configured Pi also has a `~/.local/bin/athena` launcher that loads
+its private settings. Its voice listener normally runs as a background service;
+stop that listener before starting another voice session.
 
-Say or type `close Notepad` to request normal closing. If Athena lists several
-windows, reply `close window one` or another listed number. Some applications
-hide to the tray instead of exiting; Athena reports that distinction.
+Try `open Notepad`, then `close Notepad`. If several windows match, Athena lists
+them. Reply `close window one` or another listed number within 50 seconds.
+Other ways of naming a window, such as "the second Firefox window", are not
+currently handled by that local selection step.
 
-## Development
+A launch being accepted does not mean its window is ready. Closing a window
+may hide an app in the tray rather than end it. Athena reports these differences
+and keeps recent results so a repeated request ID does not repeat the action.
+That history is cleared when the process restarts.
 
-`src/` contains the runtime, `voice/` holds setup/model information, and `tests/`
-contains regression checks. Offline benchmarks and the voice lab live outside
-this repo in the sibling `athena_tools/` folder. Local `docs/` are ignored.
+## Still to do
+
+- Split requests that mix known commands with contextual work. Today, a partly
+  understood request is sent whole to the model or asks for clarification.
+- Save confirmed app nicknames so repeated phrases can run locally.
+  Athena does not learn those aliases automatically yet.
+- Improve speech accuracy and false wake detections. Voice training is paused.
+
+## Working on Athena
+
+`src/` contains the application, `voice/` contains voice setup and model
+information, and `tests/` contains checks. Training and research tools live
+outside this repo in the sibling `athena_tools/` folder. Local `docs/` are ignored.
+
+Run the checks with:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests
 ```
-
-Windows companion: [Athena Desktop](https://github.com/b-stha/athena-desktop).
