@@ -33,6 +33,8 @@ Enable model-free registered commands with `ATHENA_LOCAL_HA_ENABLED=true` and
 Application discovery requires Athena Desktop's MCP extension. Older Windows-MCP
 setups retain the previous Notepad-only path. Ambiguous app names ask for
 clarification; unavailable or stale catalogs do not trigger an automatic retry.
+Personal nicknames may still need the model. Persistent nickname learning from
+verified app resolutions is planned; conversation history is not an alias registry.
 
 ## Use
 

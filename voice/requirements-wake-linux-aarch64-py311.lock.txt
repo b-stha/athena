@@ -1,7 +1,8 @@
-# Inference environment resolved on 2026-10-17.
+# Optional standalone inference snapshot resolved on 2026-10-17.
 # Raspberry Pi: Debian 12, aarch64, Python 3.11.2, glibc 2.36.
 # Full pip freeze --all; use only in a separate inference venv on this platform.
-# Not a training environment. See WAKE_VALIDATION.md for checks and limits.
+# Not the main OVOS application's lock or a training environment.
+# Evaluation notes live in the separate athena_tools/voice_lab project.
 certifi==2026.7.22
 cffi==2.1.1
 charset-normalizer==3.5.2

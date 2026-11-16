@@ -1,5 +1,5 @@
 # Main inference pins: Linux/aarch64, Python 3.10 or 3.11.
-# Python 3.11 Pi validation: see ../../athena_tools/voice_lab/docs/WAKE_VALIDATION.md.
+# Evaluation notes live in the separate athena_tools/voice_lab project.
 # Not a training lock or complete transitive lock; Python 3.10 is not tested.
 # Standalone evaluation can use .venv-wake. The custom live detector also needs
 # these pins in the main voice environment; install alongside requirements.txt.
