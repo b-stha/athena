@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
 import hashlib
@@ -193,7 +194,19 @@ class ToolRegistry:
         await asyncio.gather(*(peer.close() for peer in self.peers.values()), return_exceptions=True)
 
     def definitions(self):
-        return [self.tools[name].definition() for name in sorted(self.tools)]
+        result = []
+        for name in sorted(self.tools):
+            spec = self.tools[name]
+            definition = spec.definition()
+            if spec.server == 'windows' and spec.original == 'AthenaCloseApp':
+                # Explicit window choices come from the user's numbered reply
+                # through DirectApps, never an LLM guessing among open windows.
+                definition = deepcopy(definition)
+                schema = definition['function']['parameters']
+                schema.get('properties', {}).pop('window_id', None)
+                schema['additionalProperties'] = False
+            result.append(definition)
+        return result
 
     async def call(self, name, arguments):
         spec = self.tools.get(name)
@@ -201,6 +214,8 @@ class ToolRegistry:
             raise ToolError("Unknown tool; no action sent.")
         if not isinstance(arguments, dict):
             raise ToolError("Tool arguments must be a JSON object; no action sent.")
+        if spec.server == 'windows' and spec.original == 'AthenaCloseApp' and 'window_id' in arguments:
+            raise ToolError("Window selection requires the user's explicit numbered reply; no close sent.")
         if not spec.validator.is_valid(arguments):
             raise ToolError("Tool arguments failed the discovered JSON schema; no action sent.")
         result = await self.peers[spec.server].call(spec.original, arguments)

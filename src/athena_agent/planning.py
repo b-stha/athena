@@ -44,7 +44,7 @@ SCOPE_GUARDS = (
     ('correction_or_alternative', r'\b(?:but|or|instead|rather|actually|cancel|stop|forget|ignore)\b'),
     ('unresolved_reference', r'\b(?:it|them|that|those|these|same|again|previous)\b'),
 )
-VERBS = r'(?:turn|switch|open|launch|start|wake|power|shutdown|shut|restart|reboot|sleep|suspend|put|send|show|find|search|tell)'
+VERBS = r'(?:turn|switch|open|launch|start|close|exit|quit|wake|power|shutdown|shut|restart|reboot|sleep|suspend|put|send|show|find|search|tell)'
 BOUNDARY = re.compile(
     rf'(?:\s+(?P<word>and\s+then|and|then)\s+|(?P<semicolon>;)\s*)'
     rf'(?=(?:please\s+)?{VERBS}\b)', re.IGNORECASE)
@@ -64,11 +64,19 @@ def cloud_tool_servers(text):
     This chooses tool access, never an action or a replacement target. A model
     may interpret a light request, but it cannot explore Windows to resolve it.
     """
+    if is_app_close_request(text):
+        return frozenset({'windows'})
     normalized = normalize_command(text)
     if (HA_HINT.search(normalized) and not PC_HINT.search(normalized)
             and not needs_application_catalog(text)):
         return frozenset({'ha'})
     return None
+
+
+def is_app_close_request(text):
+    body = WAKE_PREFIX.sub('', text, count=1).strip()
+    return re.match(r'(?:(?:can|could|would) you )?(?:please )?(?:close|exit|quit)\s+\S',
+                    body, re.IGNORECASE) is not None
 
 
 def _unclear_switch_target(text):
@@ -105,14 +113,14 @@ def _scope_reason(text):
 
 
 def needs_application_catalog(text):
-    """Read-only discovery is needed only for an app-opening clause."""
+    """Read-only discovery is needed only for an application clause."""
     body = WAKE_PREFIX.sub('', text, count=1)
     boundaries = list(BOUNDARY.finditer(body))
     starts = [0, *(boundary.end() for boundary in boundaries)]
     ends = [*(boundary.start() for boundary in boundaries), len(body)]
     for start, end in zip(starts, ends):
         clause = body[start:end].strip()
-        if re.match(r'(?:please\s+)?(?:open|launch|start)\s+\S', clause, re.IGNORECASE):
+        if re.match(r'(?:please\s+)?(?:open|launch|start|close|exit|quit)\s+\S', clause, re.IGNORECASE):
             # "Open the blinds" needs HA context even when the PC is off.
             # An explicit app/PC cue keeps a Windows lookup available.
             if not HA_OPEN_HINT.search(clause) or PC_HINT.search(normalize_command(clause)):

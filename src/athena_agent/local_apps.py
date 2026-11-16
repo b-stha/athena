@@ -1,10 +1,11 @@
-"""Windows-owned app discovery and exact-ID launches without cloud inference."""
+"""Windows-owned app discovery, launching and closing without cloud inference."""
 
 from dataclasses import dataclass
 import json
 import math
 import os
 from pathlib import PureWindowsPath
+import re
 import time
 from uuid import uuid4
 
@@ -22,6 +23,17 @@ class AppNotSent(RuntimeError):
 
 class AppUnknownOutcome(RuntimeError):
     pass
+
+
+class AppNeedsWindowChoice(AppNotSent):
+    pass
+
+
+@dataclass(frozen=True)
+class AppExecutionResult:
+    status: str
+    reason: str
+    choices: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -76,6 +88,11 @@ class DirectApps:
                 if result.isError:
                     raise ValueError('Catalog tool failed.')
                 snapshot = ApplicationCatalog.from_document(_document(result))
+                if any('close' in app.operations for app in snapshot.applications.values()):
+                    _check_tool(tools, 'AthenaAppWindows', {'application_id': 'app_' + '0' * 32,
+                                'revision': snapshot.revision})
+                    _check_tool(tools, 'AthenaCloseApp', {'application_id': 'app_' + '0' * 32,
+                                'revision': snapshot.revision, 'request_id': 'schema_check'})
             except Exception:
                 raise AppNotSent('Windows application catalog is unavailable or incompatible.') from None
             self.snapshot, self._catalog_checked = snapshot, self.clock()
@@ -90,12 +107,18 @@ class DirectApps:
 
     def _validate(self, action):
         validate_action(action, applications=self.snapshot.vocabulary if self.snapshot else None)
-        if (action.backend, action.action, action.target_type) != ('desktop', 'launch_app', 'application'):
-            raise ValueError('Only registered application launches are supported.')
+        if (action.backend != 'desktop' or action.target_type != 'application'
+                or action.action not in {'launch_app', 'close_app'}):
+            raise ValueError('Only registered application actions are supported.')
+        operation = 'close' if action.action == 'close_app' else 'launch'
+        if operation == 'close' and self.snapshot is None:
+            raise AppNotSent('The Windows extension does not support graceful closing.')
         if self.snapshot is not None:
             app = self.snapshot.applications.get(action.target)
-            if app is None or 'launch' not in app.operations:
+            if app is None:
                 raise ValueError('The application is absent from the Windows catalog.')
+            if operation not in app.operations:
+                raise AppNotSent('The requested application operation is unavailable.')
 
     async def close(self):
         # Every request owns/closes its peer; no long-lived connection is retained.
@@ -107,8 +130,14 @@ class DirectApps:
             revision = self.snapshot.revision
             snapshot = await self.catalog(refresh=True)
             if snapshot is None or snapshot.revision != revision:
-                raise AppNotSent('Windows application catalog changed. No launch sent.')
+                raise AppNotSent('Windows application catalog changed. No action sent.')
             self._validate(action)
+            if action.action == 'close_app':
+                rows = await self._windows(action)
+                if len(rows) != 1:
+                    if rows:
+                        raise AppNeedsWindowChoice('Repeat the close command separately to select a window.')
+                    raise AppNotSent('No matching window could be identified.')
             return
         await self._legacy_preflight(action)
 
@@ -133,11 +162,13 @@ class DirectApps:
         finally:
             await peer.close()
 
-    async def execute_request(self, action, *, request_id):
-        return await self.execute(action, request_id=request_id)
+    async def execute_request(self, action, *, request_id, window_id=None):
+        return await self.execute(action, request_id=request_id, window_id=window_id)
 
-    async def execute(self, action, *, request_id=None):
+    async def execute(self, action, *, request_id=None, window_id=None):
         self._validate(action)
+        if action.action == 'close_app':
+            return await self._close_window(action, request_id=request_id, window_id=window_id)
         if self.snapshot is None:
             return await self._legacy_execute(action)
         request_id = uuid4().hex if request_id is None else request_id
@@ -167,6 +198,68 @@ class DirectApps:
                 raise AppNotSent('Windows could not use the selected catalog entry. No launch sent.')
             if document.get('status') != 'accepted':
                 raise AppUnknownOutcome('Windows did not confirm the launch handoff; not retried.')
+        finally:
+            await peer.close()
+
+    async def _windows(self, action):
+        arguments = {'application_id': action.target, 'revision': self.snapshot.revision}
+        peer = self.peer_factory(self.config.server, self.config.timeout, self.config.discovery_timeout)
+        try:
+            tools = await peer.start()
+            _check_tool(tools, 'AthenaAppWindows', arguments)
+            result = await peer.call('AthenaAppWindows', arguments)
+            document = _document(result)
+            if (result.isError or type(document.get('schema_version')) is not int
+                    or document['schema_version'] != 1
+                    or document.get('status') != 'ready'
+                    or any(document.get(key) != value for key, value in arguments.items())):
+                raise AppNotSent('Windows could not identify the application windows.')
+            return _choices(document.get('windows'))
+        finally:
+            await peer.close()
+
+    async def _close_window(self, action, *, request_id=None, window_id=None):
+        arguments = {'application_id': action.target, 'revision': self.snapshot.revision,
+                     'request_id': uuid4().hex if request_id is None else request_id}
+        if window_id is not None:
+            if not isinstance(window_id, str) or not re.fullmatch(r'win_[0-9a-f]{32}', window_id):
+                raise ValueError('Use an issued window ID.')
+            arguments['window_id'] = window_id
+        peer = self.peer_factory(self.config.server, self.config.timeout, self.config.discovery_timeout)
+        try:
+            try:
+                tools = await peer.start()
+                _check_tool(tools, 'AthenaCloseApp', arguments)
+            except Exception:
+                raise AppNotSent('Windows close tool is unavailable or incompatible; no close sent.') from None
+            try:
+                result = await peer.call('AthenaCloseApp', arguments)
+            except Exception:
+                raise AppUnknownOutcome('Windows close outcome is unknown; not retried.') from None
+            document = _document(result)
+            if (type(document.get('schema_version')) is not int or document['schema_version'] != 1
+                    or document.get('operation') != 'close'
+                    or any(document.get(key) != value for key, value in arguments.items())
+                    or type(document.get('message_sent')) is not bool
+                    or type(document.get('window_closed')) is not bool
+                    or not isinstance(document.get('reason'), str)
+                    or len(document['reason']) > 80):
+                raise AppUnknownOutcome('Windows returned an invalid close receipt; not retried.')
+            status = document.get('status')
+            rows = _choices(document.get('windows'))
+            sent, closed = document['message_sent'], document['window_closed']
+            if sent and (not isinstance(document.get('window_id'), str)
+                         or not re.fullmatch(r'win_[0-9a-f]{32}', document['window_id'])):
+                raise AppUnknownOutcome('Windows did not identify the selected window; not retried.')
+            valid = ((status == 'closed' and sent and closed)
+                     or (status in {'hidden', 'pending'} and sent and not closed)
+                     or (status == 'clarification' and not sent and not closed and len(rows) > 1)
+                     or (status == 'not_started' and not sent and not closed))
+            if not valid or (result.isError and status in {'closed', 'hidden'}):
+                raise AppUnknownOutcome('Windows did not confirm the close outcome; not retried.')
+            if document['reason'] == 'catalog_changed':
+                self._catalog_checked = float('-inf')
+            return AppExecutionResult(status, document['reason'], rows)
         finally:
             await peer.close()
 
@@ -241,3 +334,18 @@ def _document(result):
             if isinstance(value, dict):
                 return value
     raise AppUnknownOutcome('Windows returned no structured application result.')
+
+
+def _choices(rows):
+    if not isinstance(rows, list) or len(rows) > 32:
+        raise AppUnknownOutcome('Windows returned invalid window choices.')
+    result, seen = [], set()
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get('id'), str)
+                or not re.fullmatch(r'win_[0-9a-f]{32}', row['id']) or row['id'] in seen
+                or not isinstance(row.get('title'), str) or len(row['title']) > 240
+                or any(ord(char) < 32 or ord(char) == 127 for char in row['title'])):
+            raise AppUnknownOutcome('Windows returned an invalid window choice.')
+        seen.add(row['id'])
+        result.append((row['id'], row['title']))
+    return tuple(result)

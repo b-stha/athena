@@ -5,13 +5,14 @@ from collections import OrderedDict
 from dataclasses import dataclass, replace
 import hashlib
 import os
+import re
 import time
 
 from router import Action, validate_action
 
 from .local_ha import HomeAssistantMCP, HANotSent, HARejected, LocalHAConfig
-from .local_apps import AppNotSent, DirectApps, LocalAppsConfig
-from .planning import needs_application_catalog, plan_command
+from .local_apps import AppExecutionResult, AppNeedsWindowChoice, AppNotSent, DirectApps, LocalAppsConfig
+from .planning import WAKE_PREFIX, needs_application_catalog, plan_command
 from .routing import RouteEvent, emit_route_event, route_reason
 
 
@@ -74,6 +75,7 @@ class RequestDispatcher:
         self.agent = self.local = None
         self.ledger = OrderedDict()
         self.pending_context = OrderedDict()
+        self.window_choices = OrderedDict()
         self.lock = asyncio.Lock()
         self.event_sink = emit_route_event if event_sink is None else event_sink
         self.last_route_event = None
@@ -198,6 +200,37 @@ class RequestDispatcher:
         self.ledger[key] = record
         while len(self.ledger) > 128:
             self.ledger.popitem(last=False)
+        selected_window_id = None
+        selection = re.fullmatch(r'(?:please )?(?:(?:close|select|choose) )?window '
+                                 r'(one|two|three|four|five|six|seven|eight|[1-9][0-9]?)'
+                                 r'(?: please)?[.!]?',
+                                 WAKE_PREFIX.sub('', text, count=1).strip(), re.IGNORECASE)
+        pending = self.window_choices.pop(session_id, None)
+        if selection is not None:
+            if pending is None or pending[0] <= time.monotonic():
+                record.status = trace['outcome'] = 'clarification'
+                trace.update(route='clarify', reason='window_selection_expired')
+                record.reply = 'No current window selection. Please repeat the close command with the application name.'
+                return record.reply
+            word = selection[1].casefold()
+            index = int(word) if word.isdigit() else (
+                'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight').index(word) + 1
+            if index > len(pending[3]):
+                self.window_choices[session_id] = pending
+                record.status = trace['outcome'] = 'clarification'
+                trace.update(route='clarify', reason='invalid_window_selection')
+                record.reply = f'Please choose a window from 1 to {len(pending[3])}.'
+                return record.reply
+            if self.apps is None or self.apps.snapshot is None or self.apps.snapshot.revision != pending[2]:
+                record.status = trace['outcome'] = 'not_started'
+                trace.update(route='local', reason='window_catalog_changed')
+                record.reply = 'The application catalog changed. Please repeat the close command. No action sent.'
+                return record.reply
+            selected_window_id = pending[3][index - 1][0]
+            step = replace(plan.steps[0], route='local', action=pending[1], reason='explicit_window_selection')
+            plan = replace(plan, steps=(step,), scope_strategy='window_selection')
+            trace.update(route='local', reason='explicit_window_selection', step_count=1)
+            record.route = 'local'
         if trace['reason'] == 'application_catalog_unavailable':
             record.status = trace['outcome'] = 'not_started'
             record.reply = 'Windows application catalog is unavailable. No actions sent.'
@@ -207,6 +240,8 @@ class RequestDispatcher:
         if trace['route'] == 'clarify':
             record.status = trace['outcome'] = 'clarification'
             record.reply = ('Please use at most three actions.' if trace['reason'] == 'compound_step_limit'
+                else 'Please issue the close command separately from contextual actions for now.'
+                    if trace['reason'] == 'mixed_close_not_integrated'
                 else 'Which device should I turn on or off? Please repeat its full name.'
                     if trace['reason'] == 'unresolved_switch_target'
                 else 'Please repeat the complete command, including its action and target.'
@@ -217,7 +252,7 @@ class RequestDispatcher:
         if trace['route'] == 'local' and len(plan.steps) > 1:
             return await self._compound(text, session_id, plan, record, trace)
         is_app = (step.action is not None and step.action.backend == 'desktop'
-                  and step.action.action == 'launch_app')
+                  and step.action.action in {'launch_app', 'close_app'})
         if (len(plan.steps) == 1 and step.route == 'local'
                 and ((self.local_enabled and step.action.backend == 'home_assistant')
                      or (self.apps_enabled and is_app))):
@@ -239,12 +274,14 @@ class RequestDispatcher:
                 try:
                     trace['local_action_attempts'] += 1
                     if is_app:
-                        await self._execute_app(executor, step.action, step.step_id, session_id)
+                        result = await self._execute_app(executor, step.action, step.step_id, session_id,
+                                                         window_id=selected_window_id)
                     else:
                         await executor.execute(step.action)
                 except AppNotSent:
                     record.status = 'not_started'
-                    record.reply = 'Windows MCP was unavailable or incompatible. No launch sent.'
+                    operation = 'close' if step.action.action == 'close_app' else 'launch'
+                    record.reply = f'Windows MCP was unavailable or incompatible. No {operation} sent.'
                 except HANotSent:
                     record.status = 'not_started'
                     record.reply = 'Home Assistant MCP was unavailable, incompatible or ambiguous. No action sent.'
@@ -263,7 +300,13 @@ class RequestDispatcher:
                 else:
                     record.status = 'accepted'
                     if is_app:
-                        record.reply = f'{self._app_name(executor, step.action)} launch accepted. Window readiness is not confirmed.'
+                        record.status, record.reply = self._app_reply(executor, step.action, result)
+                        if (step.action.action == 'close_app' and isinstance(result, AppExecutionResult)
+                                and result.status == 'clarification' and 1 < len(result.choices) <= 8):
+                            self.window_choices[session_id] = (time.monotonic() + 50, step.action,
+                                executor.snapshot.revision, result.choices)
+                            while len(self.window_choices) > 8:
+                                self.window_choices.popitem(last=False)
                     else:
                         target = step.action.target.removeprefix('light.').replace('_', ' ')
                         state = 'on' if step.action.action == 'turn_on' else 'off'
@@ -335,6 +378,11 @@ class RequestDispatcher:
             trace['outcome'] = record.status = 'not_started'
             self._remember(text, record, session_id)
             raise
+        except AppNeedsWindowChoice:
+            record.reply = 'The close needs a window selection. Please issue that close command separately. No actions sent.'
+            trace['outcome'] = record.status = 'clarification'
+            self._remember(text, record, session_id)
+            return record.reply
         except Exception:
             record.reply = 'Compound request preflight failed. No actions sent.'
             trace['outcome'] = record.status = 'not_started'
@@ -359,7 +407,7 @@ class RequestDispatcher:
             trace['local_action_attempts'] += 1
             try:
                 if step.action.backend == 'desktop':
-                    await self._execute_app(executor, step.action, step.step_id, session_id)
+                    result = await self._execute_app(executor, step.action, step.step_id, session_id)
                 else:
                     await executor.execute(step.action)
             except asyncio.CancelledError:
@@ -368,7 +416,7 @@ class RequestDispatcher:
                 finish()
                 raise
             except AppNotSent:
-                update(index, status='not_started', reply='Windows launch not sent. Remaining actions stopped.')
+                update(index, status='not_started', reply='Windows action not sent. Remaining actions stopped.')
                 record.status = 'partial' if index else 'not_started'
                 return finish()
             except HANotSent:
@@ -389,18 +437,53 @@ class RequestDispatcher:
                     target = action.target.removeprefix('light.').replace('_', ' ')
                     reply = f'Requested {target} lights {"on" if action.action == "turn_on" else "off"}.'
                 else:
-                    reply = f'{self._app_name(executor, action)} launch accepted; window readiness is unconfirmed.'
+                    status, reply = self._app_reply(executor, action, result)
+                    if status not in {'accepted', 'closed', 'hidden'}:
+                        update(index, status=status, reply=reply + ' Remaining actions stopped.')
+                        record.status = 'partial' if index else status
+                        return finish()
+                    update(index, status=status, reply=reply)
+                    continue
                 update(index, status='accepted', reply=reply)
         record.status = 'accepted'
         return finish()
 
     @staticmethod
-    async def _execute_app(executor, action, request_id, session_id):
+    async def _execute_app(executor, action, request_id, session_id, *, window_id=None):
         execute_request = getattr(executor, 'execute_request', None)
         if execute_request is not None:
             session_key = hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:16]
-            return await execute_request(action, request_id=f'{session_key}:{request_id}')
+            kwargs = {'request_id': f'{session_key}:{request_id}'}
+            if window_id is not None:
+                kwargs['window_id'] = window_id
+            return await execute_request(action, **kwargs)
         return await executor.execute(action)
+
+    @staticmethod
+    def _app_reply(executor, action, result):
+        name = RequestDispatcher._app_name(executor, action)
+        if action.action == 'launch_app':
+            return 'accepted', f'{name} launch accepted. Window readiness is not confirmed.'
+        if not isinstance(result, AppExecutionResult):
+            return 'unknown', 'Windows did not return a verified close receipt. Not retried.'
+        if result.status == 'closed':
+            return 'closed', f'{name} window closed.'
+        if result.status == 'hidden':
+            return 'hidden', f'{name} window hidden. The application may still be running.'
+        if result.status == 'pending':
+            return 'pending', f'Close requested for {name}, but its window is still open. Check the app for unsaved work or confirmation. Not retried.'
+        if result.status == 'clarification':
+            if len(result.choices) > 8:
+                return 'clarification', f'Too many {name} windows to select here. Please close some manually.'
+            choices = ' '.join(f'{index}: {title or "Untitled window"}.'
+                               for index, (_, title) in enumerate(result.choices, 1))
+            return 'clarification', f'Multiple {name} windows. {choices} Say "close window one", or another listed number.'
+        reasons = {'window_not_identified': f'No matching {name} window could be identified.',
+                   'close_not_sent': f'{name} could not receive a normal close request. Check for a dialog or permissions.',
+                   'window_changed': 'The selected window changed.',
+                   'selection_expired': 'The window selection expired.',
+                   'catalog_changed': 'The application catalog changed.'}
+        return 'not_started', reasons.get(result.reason, 'Windows could not prepare the close request.') + ' No close sent.'
 
     @staticmethod
     def _app_name(executor, action):

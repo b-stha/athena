@@ -121,6 +121,7 @@ class CommandTemplate:
 
 COMMAND_TEMPLATES = (
     CommandTemplate("OpenApplication", "desktop", "launch_app", "Application", r"open|launch|start"),
+    CommandTemplate("CloseApplication", "desktop", "close_app", "Application", r"close|exit|quit"),
     CommandTemplate("WakeDesktop", "desktop", "wake", "Desktop", r"turn on|wake up|wake|power on|switch on"),
     CommandTemplate("ShutdownDesktop", "desktop", "shutdown", "Desktop", r"shutdown|shut down|turn off|power off|switch off"),
     CommandTemplate("RestartDesktop", "desktop", "restart", "Desktop", r"restart|reboot"),
@@ -173,7 +174,7 @@ def application_scope_view(command, *, applications=None, boundaries=()):
     if not names or len(boundaries) > 8:
         return command
     targets = _alternatives(names).replace(r'\ ', r'\s+')
-    pattern = re.compile(rf'(?:please\s+)?(?:open|launch|start)\s+(?:the\s+)?'
+    pattern = re.compile(rf'(?:please\s+)?(?:open|launch|start|close|exit|quit)\s+(?:the\s+)?'
                          rf'(?P<target>{targets})(?:\s+please)?[.!]?', re.IGNORECASE)
     starts = [0, *(boundary.end() for boundary in boundaries)]
     ends = [*(boundary.start() for boundary in boundaries), len(command)]
@@ -231,7 +232,7 @@ def validate_action(action, *, applications=None):
         vocabulary = APPLICATIONS if applications is None else applications
         app_ids = {app_id for value in vocabulary.values()
                    for app_id in (value if isinstance(value, tuple) else (value,))}
-        if action.action == "launch_app" and action.target_type == "application" and action.target in app_ids:
+        if action.action in {"launch_app", "close_app"} and action.target_type == "application" and action.target in app_ids:
             return action
         if action.action in {"wake", "shutdown", "restart", "sleep"} and action.target == "pc" and action.target_type == "device":
             return action
@@ -244,6 +245,8 @@ def validate_action(action, *, applications=None):
 def execute_action(action):
     """Execute only validated actions; backend failures never become fallback."""
     validate_action(action)
+    if action.backend == "desktop" and action.action == "close_app":
+        raise ValueError("Graceful closing requires normal voice/text Windows MCP routing.")
     if action.backend == "home_assistant":
         if action.target_type == "area_id":
             home_assistant.call_service("light", action.action, area_id=action.target)

@@ -49,7 +49,7 @@ class ApplicationCatalog:
                 raise ValueError('Invalid or duplicate Windows application entry.')
             app = Application(app_id, name, tuple(aliases), tuple(operations))
             apps[app_id] = app
-            if 'launch' not in operations:
+            if not {'launch', 'close'}.intersection(operations):
                 continue
             for alias in (name, *aliases):
                 # Hyphenated Start-menu names also accept their spoken spacing.

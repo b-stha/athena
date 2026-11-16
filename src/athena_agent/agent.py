@@ -20,6 +20,8 @@ Do not claim an action succeeded without supporting tool results. Distinguish ac
 Never repeat an action whose outcome is unknown. Report partial completion and uncertainty plainly.
 For application launches, prefer AthenaAppCatalog with a name query and AthenaLaunchApp when available.
 Use returned IDs and revisions; do not invent paths or search the filesystem for registered apps.
+For normal app closing use AthenaCloseApp. Never substitute process termination or answer save dialogs.
+If multiple windows match, ask the user; a window close does not establish that background processes exited.
 An unavailable server cannot be controlled. Wake-on-LAN sends a packet and does not confirm startup.
 Respond concisely for a voice interface. Tools execute sequentially, even if you request a batch."""
 
@@ -157,15 +159,24 @@ class Agent:
                 if servers is not None:
                     tools = [tool for tool in tools if any(
                         tool['function']['name'].startswith(server + '__') for server in servers)]
-                    prefix[0]['content'] += ('\nThis request is limited to Home Assistant. '
-                        'If the device is unclear, ask for clarification. Do not search Windows for it.')
+                    if servers == frozenset({'windows'}):
+                        close_tools = {'windows__AthenaAppCatalog', 'windows__AthenaAppWindows',
+                                       'windows__AthenaCloseApp'}
+                        tools = [tool for tool in tools if tool['function']['name'] in close_tools]
+                        prefix[0]['content'] += ('\nThis request permits only registered-app window discovery '
+                            'and normal closing. Ask for clarification if the app/window is unclear. '
+                            'Never substitute a shell command or process termination.')
+                    else:
+                        prefix[0]['content'] += ('\nThis request is limited to Home Assistant. '
+                            'If the device is unclear, ask for clarification. Do not search Windows for it.')
                 wake_enabled = servers is None and bool(os.getenv("PC_MAC_ADDRESS", "").strip())
                 if wake_enabled:
                     tools.append(deepcopy(WAKE_DEFINITION))
                 unavailable = ", ".join(sorted(registry.unavailable)) or "none"
                 prefix[0]["content"] += f"\nCurrently unavailable MCP servers: {unavailable}."
                 reply = await self._iterate(prefix, current, tools, registry, wake_enabled, execution,
-                    allowed_tools=None if servers is None else {tool['function']['name'] for tool in tools})
+                    allowed_tools=None if servers is None else {tool['function']['name'] for tool in tools},
+                    close_only=servers == frozenset({'windows'}))
         except ModelError as error:
             execution["status"] = "failed"
             execution["error"] = str(error)[:512]
@@ -214,8 +225,10 @@ class Agent:
                 return False
         return not pending
 
-    async def _iterate(self, prefix, current, tools, registry, wake_enabled, execution, *, allowed_tools=None):
+    async def _iterate(self, prefix, current, tools, registry, wake_enabled, execution, *,
+                       allowed_tools=None, close_only=False):
         total, images_used, used_ids = 0, 0, set()
+        close_attempted = False
         for _ in range(self.config.max_rounds):
             self.model_request_attempts += 1
             self._publish_execution(execution)
@@ -267,6 +280,13 @@ class Agent:
                 # preceding the forbidden one. No side effect from it has begun.
                 return self._partial_reply(execution, execution['error'] +
                     ' No actions in that batch were sent. Please repeat the target.')
+            close_calls = [call for call in parsed if call[1] == 'windows__AthenaCloseApp']
+            if close_only and close_calls and (close_attempted or len(close_calls) > 1):
+                execution['records'].extend(ToolExecutionRecord(call_id, name[:128], 'rejected')
+                                            for call_id, name, _ in parsed)
+                execution['status'] = 'failed'
+                return self._partial_reply(execution,
+                    'Only one close attempt is allowed per user request. No additional actions sent.')
             current.append({"role": "assistant", "content": content, "tool_calls": calls, **metadata})
             image_messages, stopped = [], None
             for call_id, name, arguments in parsed:
@@ -289,6 +309,8 @@ class Agent:
                             result = {"content": "Wake packet sent. PC startup is not confirmed.", "images": []}
                             status = "accepted"
                         else:
+                            if close_only and name == 'windows__AthenaCloseApp':
+                                close_attempted = True
                             result = await registry.call(name, arguments)
                             if (not isinstance(result, dict) or not isinstance(result.get("content"), str)
                                     or not isinstance(result.get("images"), list)):

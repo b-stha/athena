@@ -7,8 +7,9 @@ requests use a cloud model and MCP tools.
 Current support includes light controls, opening registered Windows apps, and
 short compound commands such as “turn on nanoleafs and open Notepad.” Windows
 supplies the application catalog; the Pi caches and matches its names without a
-model request. Graceful closing is planned. Voice recognition is still being
-improved; responses currently appear as text.
+model request. Registered apps can also receive normal window-close requests.
+Save prompts need user attention, and several matching windows require a choice.
+Voice recognition is still being improved; responses currently appear as text.
 
 Unclear switch targets and incomplete commands ask for clarification. Explicit
 light requests that need the model use HA tools; mixed PC/HA requests retain both.
@@ -45,6 +46,10 @@ verified app resolutions is planned; conversation history is not an alias regist
 
 Stop an existing voice listener before starting another. The provisioned Pi's
 `~/.local/bin/athena` launcher also loads its private secrets file.
+
+Say or type `close Notepad` to request normal closing. If Athena lists several
+windows, reply `close window one` or another listed number. Some applications
+hide to the tray instead of exiting; Athena reports that distinction.
 
 ## Development
 
