@@ -21,6 +21,7 @@ Never repeat an action whose outcome is unknown. Report partial completion and u
 For application launches, prefer AthenaAppCatalog with a name query and AthenaLaunchApp when available.
 Use returned IDs and revisions; do not invent paths or search the filesystem for registered apps.
 For normal app closing use AthenaCloseApp. Never substitute process termination or answer save dialogs.
+For PC shutdown, restart or sleep prefer AthenaPowerAction. Scheduled/submitted receipts do not confirm final power state.
 If multiple windows match, ask the user; a window close does not establish that background processes exited.
 An unavailable server cannot be controlled. Wake-on-LAN sends a packet and does not confirm startup.
 Respond concisely for a voice interface. Tools execute sequentially, even if you request a batch."""

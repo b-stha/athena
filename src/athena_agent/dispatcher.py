@@ -12,8 +12,9 @@ from router import Action, validate_action
 
 from .local_ha import HomeAssistantMCP, HANotSent, HARejected, LocalHAConfig
 from .local_apps import AppExecutionResult, AppNeedsWindowChoice, AppNotSent, DirectApps, LocalAppsConfig
+from .local_power import DirectPower, PowerExecutionResult, PowerNotSent, PowerRejected
 from .planning import WAKE_PREFIX, needs_application_catalog, plan_command
-from .routing import RouteEvent, emit_route_event, route_reason
+from .routing import RouteEvent, emit_route_event, is_power_step, route_reason
 
 
 def cloud_agent():
@@ -51,7 +52,7 @@ class RequestDispatcher:
     New user turns receive new IDs. This is not cross-restart idempotency.
     """
     def __init__(self, *, agent_factory=None, local_factory=None, local_enabled=None, event_sink=None,
-                 apps_factory=None, apps_enabled=None):
+                 apps_factory=None, apps_enabled=None, power_factory=None, power_enabled=None):
         if local_enabled is None:
             setting = os.getenv('ATHENA_LOCAL_HA_ENABLED', 'false').strip().casefold()
             if setting not in {'true', 'false'}:
@@ -68,9 +69,14 @@ class RequestDispatcher:
         if not isinstance(apps_enabled, bool):
             raise ValueError('apps_enabled must be boolean.')
         self.apps_enabled = apps_enabled
+        self.power_enabled = apps_enabled if power_enabled is None else power_enabled
+        if not isinstance(self.power_enabled, bool):
+            raise ValueError('power_enabled must be boolean.')
         self.agent_factory = agent_factory or cloud_agent
         self.local_factory = local_factory or (lambda: HomeAssistantMCP(LocalHAConfig.from_env()))
         self.apps_factory = apps_factory or (lambda: DirectApps(LocalAppsConfig.from_env()))
+        self.power_factory = power_factory or DirectPower
+        self.power = None
         self.apps = None
         self.agent = self.local = None
         self.ledger = OrderedDict()
@@ -82,15 +88,19 @@ class RequestDispatcher:
 
     async def close(self):
         try:
-            if self.local is not None:
-                await self.local.close()
+            if self.power is not None:
+                await self.power.close()
         finally:
             try:
-                if self.apps is not None:
-                    await self.apps.close()
+                if self.local is not None:
+                    await self.local.close()
             finally:
-                if self.agent is not None:
-                    await self.agent.close()
+                try:
+                    if self.apps is not None:
+                        await self.apps.close()
+                finally:
+                    if self.agent is not None:
+                        await self.agent.close()
 
     def _remember(self, text, record, session_id):
         action = record.action
@@ -118,7 +128,7 @@ class RequestDispatcher:
             started = time.monotonic()
             plan = plan_command(text, request_id=request_id)
             session_id = str(session_id)[:128]
-            route, reason = route_reason(plan, self.local_enabled, self.apps_enabled)
+            route, reason = route_reason(plan, self.local_enabled, self.apps_enabled, self.power_enabled)
             trace = {'request_id': plan.request_id, 'route': route, 'reason': reason,
                      'outcome': 'pending', 'step_count': len(plan.steps),
                      'model_request_attempts': 0, 'local_action_attempts': 0}
@@ -126,6 +136,7 @@ class RequestDispatcher:
                 # Retained IDs replay before discovery. Plain HA turns never
                 # contact Windows, and catalog reads never initialize the model.
                 if ((session_id, plan.request_id) not in self.ledger
+                        and trace['reason'] not in {'power_must_be_last', 'mixed_power_not_integrated'}
                         and self.apps_enabled and needs_application_catalog(text)):
                     try:
                         if self.apps is None:
@@ -138,7 +149,7 @@ class RequestDispatcher:
                         if snapshot is not None:
                             plan = plan_command(text, request_id=plan.request_id,
                                                 applications=snapshot.vocabulary)
-                            route, reason = route_reason(plan, self.local_enabled, self.apps_enabled)
+                            route, reason = route_reason(plan, self.local_enabled, self.apps_enabled, self.power_enabled)
                             trace.update(route=route, reason=reason, step_count=len(plan.steps))
                 return await self._dispatch(text, session_id, plan, trace)
             except asyncio.CancelledError:
@@ -240,6 +251,10 @@ class RequestDispatcher:
         if trace['route'] == 'clarify':
             record.status = trace['outcome'] = 'clarification'
             record.reply = ('Please use at most three actions.' if trace['reason'] == 'compound_step_limit'
+                else 'Please put the PC power command last and use only one per request.'
+                    if trace['reason'] == 'power_must_be_last'
+                else 'Please issue PC power commands separately from contextual requests.'
+                    if trace['reason'] == 'mixed_power_not_integrated'
                 else 'Please issue the close command separately from contextual actions for now.'
                     if trace['reason'] == 'mixed_close_not_integrated'
                 else 'Which device should I turn on or off? Please repeat its full name.'
@@ -253,13 +268,19 @@ class RequestDispatcher:
             return await self._compound(text, session_id, plan, record, trace)
         is_app = (step.action is not None and step.action.backend == 'desktop'
                   and step.action.action in {'launch_app', 'close_app'})
+        is_power = is_power_step(step)
         if (len(plan.steps) == 1 and step.route == 'local'
                 and ((self.local_enabled and step.action.backend == 'home_assistant')
-                     or (self.apps_enabled and is_app))):
-            label = 'Windows application' if is_app else 'Home Assistant'
+                     or (self.apps_enabled and is_app)
+                     or (self.power_enabled and is_power))):
+            label = 'PC power' if is_power else 'Windows application' if is_app else 'Home Assistant'
             record.action = step.action
             try:
-                if is_app:
+                if is_power:
+                    if self.power is None:
+                        self.power = self.power_factory()
+                    executor = self.power
+                elif is_app:
                     if self.apps is None:
                         self.apps = self.apps_factory()
                     executor = self.apps
@@ -273,11 +294,17 @@ class RequestDispatcher:
                 record.status = 'dispatched'
                 try:
                     trace['local_action_attempts'] += 1
-                    if is_app:
-                        result = await self._execute_app(executor, step.action, step.step_id, session_id,
+                    if is_app or is_power:
+                        result = await self._execute_desktop(executor, step.action, step.step_id, session_id,
                                                          window_id=selected_window_id)
                     else:
                         await executor.execute(step.action)
+                except PowerNotSent:
+                    record.status = 'not_started'
+                    record.reply = 'PC power request was not sent. Check the Windows MCP connection or Wake-on-LAN configuration.'
+                except PowerRejected:
+                    record.status = 'rejected'
+                    record.reply = 'Windows rejected the PC power request. It was not retried.'
                 except AppNotSent:
                     record.status = 'not_started'
                     operation = 'close' if step.action.action == 'close_app' else 'launch'
@@ -299,7 +326,9 @@ class RequestDispatcher:
                     record.reply = f'{label} outcome is unknown. It was not retried.'
                 else:
                     record.status = 'accepted'
-                    if is_app:
+                    if is_power:
+                        record.status, record.reply = self._power_reply(step.action, result)
+                    elif is_app:
                         record.status, record.reply = self._app_reply(executor, step.action, result)
                         if (step.action.action == 'close_app' and isinstance(result, AppExecutionResult)
                                 and result.status == 'clarification' and 1 < len(result.choices) <= 8):
@@ -361,7 +390,11 @@ class RequestDispatcher:
             # Resolve every configuration and perform read-only endpoint/schema
             # checks before the first effect. Availability can still change later.
             for step in plan.steps:
-                if step.action.backend == 'home_assistant':
+                if is_power_step(step):
+                    if self.power is None:
+                        self.power = self.power_factory()
+                    executor = self.power
+                elif step.action.backend == 'home_assistant':
                     validate_action(step.action)
                     if self.local is None:
                         self.local = self.local_factory()
@@ -407,7 +440,7 @@ class RequestDispatcher:
             trace['local_action_attempts'] += 1
             try:
                 if step.action.backend == 'desktop':
-                    result = await self._execute_app(executor, step.action, step.step_id, session_id)
+                    result = await self._execute_desktop(executor, step.action, step.step_id, session_id)
                 else:
                     await executor.execute(step.action)
             except asyncio.CancelledError:
@@ -415,6 +448,14 @@ class RequestDispatcher:
                 record.status = 'unknown'
                 finish()
                 raise
+            except PowerNotSent:
+                update(index, status='not_started', reply='PC power request not sent. Remaining actions stopped.')
+                record.status = 'partial' if index else 'not_started'
+                return finish()
+            except PowerRejected:
+                update(index, status='rejected', reply='Windows rejected the power request. Not retried.')
+                record.status = 'partial' if index else 'rejected'
+                return finish()
             except AppNotSent:
                 update(index, status='not_started', reply='Windows action not sent. Remaining actions stopped.')
                 record.status = 'partial' if index else 'not_started'
@@ -437,7 +478,8 @@ class RequestDispatcher:
                     target = action.target.removeprefix('light.').replace('_', ' ')
                     reply = f'Requested {target} lights {"on" if action.action == "turn_on" else "off"}.'
                 else:
-                    status, reply = self._app_reply(executor, action, result)
+                    status, reply = (self._power_reply(action, result) if is_power_step(step)
+                                     else self._app_reply(executor, action, result))
                     if status not in {'accepted', 'closed', 'hidden'}:
                         update(index, status=status, reply=reply + ' Remaining actions stopped.')
                         record.status = 'partial' if index else status
@@ -449,7 +491,7 @@ class RequestDispatcher:
         return finish()
 
     @staticmethod
-    async def _execute_app(executor, action, request_id, session_id, *, window_id=None):
+    async def _execute_desktop(executor, action, request_id, session_id, *, window_id=None):
         execute_request = getattr(executor, 'execute_request', None)
         if execute_request is not None:
             session_key = hashlib.sha256(session_id.encode('utf-8')).hexdigest()[:16]
@@ -458,6 +500,19 @@ class RequestDispatcher:
                 kwargs['window_id'] = window_id
             return await execute_request(action, **kwargs)
         return await executor.execute(action)
+
+    @staticmethod
+    def _power_reply(action, result):
+        if not isinstance(result, PowerExecutionResult):
+            return 'unknown', 'PC power outcome is unknown. It was not retried.'
+        if action.action == 'wake' and result.reason == 'wake_packet_sent':
+            return 'accepted', 'Wake packet sent. PC startup is not confirmed.'
+        if result.status == 'scheduled':
+            return 'accepted', (f'PC {action.action} scheduled in {result.delay_seconds} seconds. '
+                                'Completion is not confirmed; unsaved work may require attention.')
+        if result.status == 'submitted':
+            return 'accepted', f'PC {action.action} requested. Completion is not confirmed.'
+        return 'unknown', 'PC power outcome is unknown. It was not retried.'
 
     @staticmethod
     def _app_reply(executor, action, result):

@@ -163,7 +163,7 @@ class FuzzyDispatchTests(unittest.IsolatedAsyncioTestCase):
         cases = ["don't open no pad", 'do not open node pad', 'never launch note pad',
                  'open not pad', 'open no path', 'open no padded', 'open no pass',
                  'open wordpad', 'open calculator', 'open notepad2', 'open my notepad', 'open a notepad',
-                 'open no pad and restart pc', 'open no pad only if I ask',
+                 'open no pad and restart', 'open no pad only if I ask',
                  'open no pad before I leave', 'open "no pad"', 'opn no pad',
                  'turn of bathroom lights', 'wake my pea sea', 'open no pad?']
         for text in cases:

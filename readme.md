@@ -1,7 +1,7 @@
 # Athena
 
 Athena is a voice and text assistant running on a Raspberry Pi. It controls
-Home Assistant lights and Windows applications. Familiar commands run without
+Home Assistant lights, Windows applications, and PC power. Familiar commands run without
 a cloud model; less familiar requests can ask a cloud model for help.
 
 ## What works today
@@ -12,6 +12,7 @@ a cloud model; less familiar requests can ask a cloud model for help.
 - Combine up to three supported commands, such as
   `turn on nanoleafs and open Notepad`.
 - Wake a configured PC over the network.
+- Shut down, restart, or sleep the PC through its Windows tools.
 - Use cloud reasoning and, when needed, Windows screenshots for other requests.
 
 Voice replies currently appear as text in the terminal or service logs.
@@ -45,7 +46,8 @@ Add your cloud model settings, connection tokens, and wake-model paths.
 Keep these private files out of Git.
 
 Set `ATHENA_LOCAL_HA_ENABLED=true` and `ATHENA_LOCAL_APPS_ENABLED=true`
-in `.env` to enable commands that run without the cloud model.
+in `.env` to enable commands that run without the cloud model. The Windows
+setting covers both apps and PC power.
 See [voice setup](voice/README.md) and [Athena Desktop](https://github.com/b-stha/athena-desktop)
 for the remaining setup.
 
@@ -69,6 +71,13 @@ A launch being accepted does not mean its window is ready. Closing a window
 may hide an app in the tray rather than end it. Athena reports these differences
 and keeps recent results so a repeated request ID does not repeat the action.
 That history is cleared when the process restarts.
+
+PC power commands include `turn off my computer`, `restart PC`, and
+`put my computer to sleep`. Desktop needs the updated power tools installed.
+Athena schedules the request briefly before Windows acts; it cannot confirm
+that the PC finished shutting down or sleeping. Unsaved work may block shutdown.
+In a combined command, put one PC power action last, for example
+`turn off nanoleafs then shutdown PC`.
 
 ## Still to do
 

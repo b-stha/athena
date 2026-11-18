@@ -38,7 +38,7 @@ def execute(action, target):
         return send_command(action, {"name": target})
 
 
-def wake_pc():
+def prepare_wake_packet():
     mac = os.getenv("PC_MAC_ADDRESS", "").strip()
     if not re.fullmatch(r"(?:[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}|(?:[0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2})", mac):
         raise ValueError("Set PC_MAC_ADDRESS in .env to the PC network adapter's MAC address.")
@@ -46,6 +46,11 @@ def wake_pc():
     address = bytes.fromhex(mac.replace(":", "").replace("-", ""))
     packet = b"\xff" * 6 + address * 16
     broadcast = os.getenv("WOL_BROADCAST_ADDRESS", "255.255.255.255").strip()
+    return packet, broadcast
+
+
+def wake_pc():
+    packet, broadcast = prepare_wake_packet()
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
             sender.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
