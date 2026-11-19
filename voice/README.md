@@ -57,6 +57,10 @@ Athena allows five seconds for command speech to begin after waking.
 Two seconds of silence ends a command. Change `ATHENA_COMMAND_WAIT` and
 `ATHENA_SILENCE_END` in `.env` if needed.
 
+Before transcription, Athena trims silence around the recording while keeping
+all detected speech and the pauses between phrases. It waits for queued audio
+to finish buffering so the end of a command is included.
+
 The background service warms up Whisper before listening. To do that separately:
 
 ```bash

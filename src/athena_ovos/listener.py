@@ -1,10 +1,50 @@
 """Keep recordings without confirmed command speech out of transcription."""
 
 from dataclasses import dataclass, field, fields
+from collections import deque
 
 from ovos_dinkum_listener.service import OVOSDinkumVoiceService
 from ovos_dinkum_listener.voice_loop.voice_loop import DinkumVoiceLoop, ListeningState
 from ovos_utils.log import LOG
+
+
+def _command_speech(audio, vad):
+    """Trim outside speech while preserving every segment and intervening pause.
+
+    WebRTC's upstream extract_speech returns at the first completed segment.
+    Use its existing classifier and padding, but continue to the last segment.
+    None leaves the original recording untouched.
+    """
+    frame_bytes = int(vad.sample_rate * vad.frame_duration_ms / 1000) * 2
+    if not audio or len(audio) % 2:
+        return None
+    padding = deque(maxlen=vad.num_padding_frames)
+    first, last, triggered = None, None, False
+    vad.reset()
+    try:
+        for offset in range(0, len(audio), frame_bytes):
+            frame = audio[offset:offset + frame_bytes]
+            # Microphone chunks are 20 ms; final VAD frames may be 30 ms.
+            # Pad only the classifier input and retain the original PCM tail.
+            speech = not vad.is_silence(frame.ljust(frame_bytes, b'\0'))
+            padding.append((offset, speech))
+            if not triggered:
+                if sum(item[1] for item in padding) > vad.thresh * padding.maxlen:
+                    triggered = True
+                    if first is None:
+                        first = padding[0][0]
+                    last = min(offset + frame_bytes, len(audio))
+                    padding.clear()
+            else:
+                last = min(offset + frame_bytes, len(audio))
+                if sum(not item[1] for item in padding) > vad.thresh * padding.maxlen:
+                    triggered = False
+                    padding.clear()
+    finally:
+        vad.reset()
+    if first is not None:
+        return audio[first:last]
+    return None
 
 
 @dataclass
@@ -36,8 +76,17 @@ class AthenaVoiceLoop(DinkumVoiceLoop):
             self._speech_confirmed = True
 
     def _vad_remove_silence(self):
-        if self._speech_confirmed:
-            super()._vad_remove_silence()
+        if not self._speech_confirmed:
+            return
+        self.stt.finish_buffering()
+        # Match the native minimum-length guard, retaining rewound audio when
+        # classification is uncertain. Replace only after the worker has drained.
+        if len(self.stt_audio_bytes) <= self.vad.sample_rate * 2:
+            return
+        speech = _command_speech(self.stt_audio_bytes, self.vad)
+        if speech and len(speech) >= self.vad.sample_rate * 2:
+            self.stt.stream.buffer.clear()
+            self.stt.stream.update(speech)
 
     def _get_tx(self, stt_context):
         if self._speech_confirmed:

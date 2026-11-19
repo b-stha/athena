@@ -71,6 +71,10 @@ class SpeechDiscardTests(unittest.TestCase):
         self.hotwords.found.return_value = "athena"
         self.hotwords.get_ww.return_value = {}
         self.vad = Mock()
+        self.vad.sample_rate = 16000
+        self.vad.frame_duration_ms = 20
+        self.vad.num_padding_frames = 15
+        self.vad.thresh = 0.8
         self.vad.extract_speech.return_value = None
         self.transformers = Mock()
         self.transformers.transform.return_value = (self.chunk, {"lang": "en-us"})
